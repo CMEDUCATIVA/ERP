@@ -26,6 +26,8 @@ import {
   Info,
   Copy,
   Check,
+  Eye,
+  EyeOff,
   ExternalLink,
   type LucideIcon,
 } from 'lucide-react';
@@ -640,6 +642,8 @@ function ConnectModal({
   );
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
+  const [showSsoSecret, setShowSsoSecret] = useState(false);
+  const [copiedSsoSecret, setCopiedSsoSecret] = useState(false);
   const [testResult, setTestResult] = useState<{
     success: boolean;
     message: string;
@@ -658,6 +662,27 @@ function ConnectModal({
       );
     }
   }, [connector.eventOptions]);
+
+  const handleCopySsoSecret = useCallback(async () => {
+    const secret = fieldValues.sso_secret?.trim();
+    if (!secret) {
+      addToast({
+        type: 'error',
+        title: t('common.validation', 'Validation'),
+        message: t('integrations.sso_secret_required', 'Generate or enter a SSO secret first'),
+      });
+      return;
+    }
+    const ok = await copyToClipboard(secret);
+    if (ok) {
+      setCopiedSsoSecret(true);
+      addToast({
+        type: 'success',
+        title: t('common.copied', 'Copied'),
+      });
+      window.setTimeout(() => setCopiedSsoSecret(false), 1500);
+    }
+  }, [fieldValues.sso_secret, addToast, t]);
 
   const handleTest = useCallback(async () => {
     // Validate all fields are filled before testing
@@ -819,15 +844,48 @@ function ConnectModal({
               )}
             </label>
             <Input
-              type={field.type || 'text'}
+              type={
+                field.key === 'sso_secret'
+                  ? showSsoSecret
+                    ? 'text'
+                    : 'password'
+                  : field.type || 'text'
+              }
               value={fieldValues[field.key] || ''}
               onChange={(e) =>
                 setFieldValues((prev) => ({ ...prev, [field.key]: e.target.value }))
               }
               placeholder={field.placeholder}
+              className={field.key === 'sso_secret' ? 'pr-20 font-mono text-xs' : undefined}
+              suffix={
+                field.key === 'sso_secret' ? (
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setShowSsoSecret((value) => !value)}
+                      className="rounded p-1 text-content-tertiary hover:bg-surface-secondary hover:text-content-primary"
+                      title={
+                        showSsoSecret
+                          ? t('integrations.hide_sso_secret', 'Ocultar secreto SSO')
+                          : t('integrations.show_sso_secret', 'Mostrar secreto SSO')
+                      }
+                    >
+                      {showSsoSecret ? <EyeOff size={14} /> : <Eye size={14} />}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleCopySsoSecret}
+                      className="rounded p-1 text-content-tertiary hover:bg-surface-secondary hover:text-content-primary"
+                      title={t('integrations.copy_sso_secret', 'Copiar secreto SSO')}
+                    >
+                      {copiedSsoSecret ? <Check size={14} /> : <Copy size={14} />}
+                    </button>
+                  </div>
+                ) : undefined
+              }
             />
             {field.key === 'sso_secret' && (
-              <div className="mt-2">
+              <div className="mt-2 flex flex-wrap gap-2">
                 <Button
                   variant="secondary"
                   size="sm"
@@ -836,6 +894,17 @@ function ConnectModal({
                   }
                 >
                   {t('integrations.generate_sso_secret', 'Generar secreto SSO')}
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={handleCopySsoSecret}
+                  disabled={!fieldValues.sso_secret?.trim()}
+                >
+                  {copiedSsoSecret ? <Check size={14} className="mr-1" /> : <Copy size={14} className="mr-1" />}
+                  {copiedSsoSecret
+                    ? t('common.copied', 'Copiado')
+                    : t('common.copy', 'Copiar')}
                 </Button>
               </div>
             )}
