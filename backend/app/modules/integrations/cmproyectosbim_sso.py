@@ -194,6 +194,7 @@ def _html_login_bridge(*, access_token: str, refresh_token: str, email: str, red
     )
 
 
+@router.get("/api/v1/integrations/cmproyectosbim/sso", response_class=HTMLResponse, include_in_schema=False)
 @router.get("/auth/cmproyectosbim/sso", response_class=HTMLResponse, include_in_schema=False)
 @router.get("/auth/" + "open" + "project/sso", response_class=HTMLResponse, include_in_schema=False)
 async def cmproyectosbim_sso_callback(

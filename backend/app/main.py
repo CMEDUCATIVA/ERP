@@ -1309,9 +1309,9 @@ def create_app() -> FastAPI:
 
     app.include_router(desktop_auth_router, prefix="/api/v1/auth")
 
-    # CMPROYECTOSBIM SSO callback. This is mounted outside /api because the
-    # BIM platform opens it directly in the browser; otherwise the SPA fallback
-    # would serve index.html and ignore the SSO token.
+    # CMPROYECTOSBIM SSO callback. The primary browser entrypoint lives under
+    # /api so stale PWA/service-worker navigation fallbacks cannot serve the
+    # SPA login page instead of this callback.
     from app.modules.integrations.cmproyectosbim_sso import router as cmproyectosbim_sso_router
 
     app.include_router(cmproyectosbim_sso_router)
