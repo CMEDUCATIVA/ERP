@@ -265,17 +265,17 @@ async def _dispatch_integration_test(itype: str, cfg: dict) -> TestNotificationR
                 template_params=[message] if message else None,
             )
 
-        elif itype == "openproject":
-            openproject_url = cfg.get("openproject_url", "")
-            if not openproject_url:
-                return TestNotificationResponse(success=False, message="Missing openproject_url in config")
+        elif itype == "cmproyectosbim":
+            cmproyectosbim_url = cfg.get("cmproyectosbim_url", "")
+            if not cmproyectosbim_url:
+                return TestNotificationResponse(success=False, message="Missing cmproyectosbim_url in config")
             try:
-                await resolve_and_validate_external_url(openproject_url)
+                await resolve_and_validate_external_url(cmproyectosbim_url)
             except UnsafeUrlError as exc:
                 return TestNotificationResponse(success=False, message=f"URL blocked: {exc}")
             return TestNotificationResponse(
                 success=True,
-                message="OpenProject URL is valid. SSO is verified by /auth/openproject/sso.",
+                message="CMPROYECTOSBIM URL is valid. SSO is verified by the ERP callback.",
             )
 
         else:
@@ -440,17 +440,17 @@ async def test_integration_config(
                 template_params=[message] if message else None,
             )
 
-        elif itype == "openproject":
-            openproject_url = cfg.get("openproject_url", "")
-            if not openproject_url:
-                return TestNotificationResponse(success=False, message="Missing openproject_url in config")
+        elif itype == "cmproyectosbim":
+            cmproyectosbim_url = cfg.get("cmproyectosbim_url", "")
+            if not cmproyectosbim_url:
+                return TestNotificationResponse(success=False, message="Missing cmproyectosbim_url in config")
             try:
-                await resolve_and_validate_external_url(openproject_url)
+                await resolve_and_validate_external_url(cmproyectosbim_url)
             except UnsafeUrlError as exc:
                 return TestNotificationResponse(success=False, message=f"URL blocked: {exc}")
             return TestNotificationResponse(
                 success=True,
-                message="OpenProject URL is valid. SSO is verified by /auth/openproject/sso.",
+                message="CMPROYECTOSBIM URL is valid. SSO is verified by the ERP callback.",
             )
 
         else:

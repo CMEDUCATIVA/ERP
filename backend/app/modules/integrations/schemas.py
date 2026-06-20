@@ -12,7 +12,16 @@ from app.core.url_safety import UnsafeUrlError, validate_external_url
 # IntegrationConfig schemas (Teams, Slack, Telegram, etc.)
 # ---------------------------------------------------------------------------
 
-INTEGRATION_TYPES = ("teams", "slack", "telegram", "discord", "whatsapp", "email", "webhook", "openproject")
+INTEGRATION_TYPES = (
+    "teams",
+    "slack",
+    "telegram",
+    "discord",
+    "whatsapp",
+    "email",
+    "webhook",
+    "cmproyectosbim",
+)
 IntegrationType = Literal[
     "teams",
     "slack",
@@ -21,7 +30,7 @@ IntegrationType = Literal[
     "whatsapp",
     "email",
     "webhook",
-    "openproject",
+    "cmproyectosbim",
 ]
 
 
@@ -86,9 +95,9 @@ def _validate_config_urls(
     if not isinstance(config, dict):
         return config or {}
     url = config.get("webhook_url")
-    if integration_type == "openproject":
-        url = config.get("openproject_url")
-    if url and integration_type in ("teams", "slack", "discord", "webhook", "openproject"):
+    if integration_type == "cmproyectosbim":
+        url = config.get("cmproyectosbim_url")
+    if url and integration_type in ("teams", "slack", "discord", "webhook", "cmproyectosbim"):
         try:
             validate_external_url(str(url))
         except UnsafeUrlError as exc:

@@ -56,7 +56,7 @@ type IntegrationType =
   | 'whatsapp'
   | 'email'
   | 'webhook'
-  | 'openproject';
+  | 'cmproyectosbim';
 
 interface IntegrationConfig {
   id: string;
@@ -311,31 +311,30 @@ const CONNECTORS: ConnectorDef[] = [
     eventOptions: AVAILABLE_EVENTS,
   },
   {
-    type: 'openproject',
-    nameKey: 'integrations.openproject',
-    defaultName: 'OpenProject / CMProyectos BIM',
-    descKey: 'integrations.openproject_desc',
-    defaultDesc: 'Single sign-on from CMProyectos BIM/OpenProject into this ERP.',
+    type: 'cmproyectosbim',
+    nameKey: 'integrations.cmproyectosbim',
+    defaultName: 'CMPROYECTOSBIM',
+    descKey: 'integrations.cmproyectosbim_desc',
+    defaultDesc: 'Inicio de sesion unico desde CMPROYECTOSBIM hacia este ERP.',
     icon: Workflow,
     color: 'bg-[#1F4E8C]',
     category: 'automation',
     status: 'available',
     fields: [
       {
-        key: 'openproject_url',
-        label: 'OpenProject URL',
+        key: 'cmproyectosbim_url',
+        label: 'URL de CMPROYECTOSBIM',
         placeholder: 'https://cmproyectos.cmeducativa.es',
       },
     ],
     setupSteps: [
-      { text: 'In OpenProject, enable the erp_sync project module.' },
-      { text: 'In OpenProject Administration > CM ERP, set the ERP URL and enable SSO.' },
-      { text: 'Use the same SSO secret in OpenProject and in this ERP server environment.' },
-      { text: 'The callback URL in this ERP is /auth/openproject/sso.' },
-      { text: 'Save this connector to document the OpenProject endpoint in Integrations.' },
+      { text: 'En CMPROYECTOSBIM, habilita el modulo erp_sync del proyecto.' },
+      { text: 'En Administracion > CM ERP, configura la URL del ERP y activa SSO.' },
+      { text: 'Usa el mismo secreto SSO en CMPROYECTOSBIM y en las variables del ERP.' },
+      { text: 'Guarda este conector para documentar el acceso desde CMPROYECTOSBIM.' },
     ],
     infoText:
-      'Server variables required: OPENPROJECT_SSO_ENABLED=true and OPENPROJECT_SSO_SECRET with the same value used by the OpenProject erp_sync plugin.',
+      'Variables requeridas en el servidor ERP: CMPROYECTOSBIM_SSO_ENABLED=true y CMPROYECTOSBIM_SSO_SECRET con el mismo valor usado por erp_sync.',
   },
   {
     type: 'webhook' as IntegrationType,
@@ -463,7 +462,7 @@ const CONNECTABLE_TYPES: IntegrationType[] = [
   'discord',
   'email',
   'webhook',
-  'openproject',
+  'cmproyectosbim',
 ];
 
 const CATEGORY_LABELS: Record<ConnectorCategory, { key: string; defaultLabel: string }> = {

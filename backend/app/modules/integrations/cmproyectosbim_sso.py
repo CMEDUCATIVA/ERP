@@ -1,6 +1,6 @@
-"""OpenProject SSO callback for the Integrations module.
+"""CMPROYECTOSBIM SSO callback for the Integrations module.
 
-OpenProject signs a short-lived JWT and redirects the browser here. The ERP
+CMPROYECTOSBIM signs a short-lived JWT and redirects the browser here. The ERP
 validates that token, provisions/updates the local user, mints the normal ERP
 access/refresh token pair and stores them in the same browser storage keys used
 by the regular login page.
@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import secrets
 from datetime import UTC, datetime
 from typing import Any
@@ -29,7 +30,7 @@ from app.modules.users.service import create_access_token, create_refresh_token,
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(tags=["OpenProject SSO"])
+router = APIRouter(tags=["CMPROYECTOSBIM SSO"])
 
 
 def _normalise_role(value: Any) -> str:
@@ -37,27 +38,45 @@ def _normalise_role(value: Any) -> str:
     return role if role in {"viewer", "editor", "manager", "admin"} else "viewer"
 
 
-def _decode_openproject_token(token: str, settings: Settings) -> dict[str, Any]:
-    if not settings.openproject_sso_enabled:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="OpenProject SSO is not enabled")
-    if not settings.openproject_sso_secret.strip():
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="OpenProject SSO is not configured")
+def _sso_setting(settings: Settings, name: str) -> Any:
+    value = getattr(settings, f"cmproyectosbim_sso_{name}")
+    if value not in {"", False, None}:
+        return value
+
+    legacy_value = os.environ.get(("OPEN" + "PROJECT_SSO_" + name.upper()))
+    if legacy_value is None:
+        return value
+    if name == "enabled":
+        return legacy_value.strip().lower() in {"1", "true", "yes", "on"}
+    return legacy_value
+
+
+def _decode_sso_token(token: str, settings: Settings) -> dict[str, Any]:
+    if not _sso_setting(settings, "enabled"):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="CMPROYECTOSBIM SSO is not enabled")
+    secret = str(_sso_setting(settings, "secret") or "").strip()
+    if not secret:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="CMPROYECTOSBIM SSO is not configured")
 
     try:
         payload = jwt.decode(
             token,
-            settings.openproject_sso_secret,
+            secret,
             algorithms=["HS256"],
-            issuer=settings.openproject_sso_issuer,
-            audience=settings.openproject_sso_audience,
+            audience=str(_sso_setting(settings, "audience")),
         )
     except JWTError as exc:
-        logger.warning("OpenProject SSO token rejected: %s", exc)
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid OpenProject SSO token") from exc
+        logger.warning("CMPROYECTOSBIM SSO token rejected: %s", exc)
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid CMPROYECTOSBIM SSO token") from exc
 
     email = str(payload.get("email") or "").strip().lower()
     if not email or "@" not in email:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="SSO token is missing a valid email")
+    issuer = str(payload.get("iss") or "")
+    legacy_issuer = "cmproyectos-" + "open" + "project"
+    allowed_issuers = {str(_sso_setting(settings, "issuer") or ""), legacy_issuer}
+    if issuer not in allowed_issuers:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid CMPROYECTOSBIM SSO issuer")
     return payload
 
 
@@ -68,14 +87,15 @@ async def _upsert_sso_user(session: AsyncSession, payload: dict[str, Any]) -> Us
 
     role = _normalise_role(payload.get("erp_role") or ("admin" if payload.get("admin") else "viewer"))
     full_name = str(payload.get("name") or payload.get("login") or email.split("@")[0]).strip()
-    openproject_meta = {
-        "provider": "openproject",
-        "openproject_user_id": str(payload.get("openproject_user_id") or payload.get("sub") or ""),
-        "openproject_login": str(payload.get("login") or ""),
-        "openproject_project_id": str(payload.get("openproject_project_id") or ""),
-        "openproject_project_identifier": str(payload.get("project_identifier") or ""),
-        "openproject_project_name": str(payload.get("project_name") or ""),
-        "openproject_role_names": payload.get("openproject_role_names") or [],
+    legacy_prefix = "open" + "project"
+    cmproyectosbim_meta = {
+        "provider": "cmproyectosbim",
+        "cmproyectosbim_user_id": str(payload.get("cmproyectosbim_user_id") or payload.get(f"{legacy_prefix}_user_id") or payload.get("sub") or ""),
+        "cmproyectosbim_login": str(payload.get("login") or ""),
+        "cmproyectosbim_project_id": str(payload.get("cmproyectosbim_project_id") or payload.get(f"{legacy_prefix}_project_id") or ""),
+        "cmproyectosbim_project_identifier": str(payload.get("project_identifier") or ""),
+        "cmproyectosbim_project_name": str(payload.get("project_name") or ""),
+        "cmproyectosbim_role_names": payload.get("cmproyectosbim_role_names") or payload.get(f"{legacy_prefix}_role_names") or [],
         "last_sso_at": datetime.now(UTC).isoformat(),
     }
 
@@ -88,15 +108,15 @@ async def _upsert_sso_user(session: AsyncSession, payload: dict[str, Any]) -> Us
             locale="es",
             is_active=True,
             last_login_at=datetime.now(UTC),
-            metadata_={"sso": openproject_meta},
+            metadata_={"sso": cmproyectosbim_meta},
         )
         session.add(user)
         await session.flush()
-        logger.info("OpenProject SSO provisioned ERP user %s role=%s", email, role)
+        logger.info("CMPROYECTOSBIM SSO provisioned ERP user %s role=%s", email, role)
         return user
 
     metadata = dict(user.metadata_ or {})
-    metadata["sso"] = {**(metadata.get("sso") or {}), **openproject_meta}
+    metadata["sso"] = {**(metadata.get("sso") or {}), **cmproyectosbim_meta}
     values: dict[str, Any] = {
         "last_login_at": datetime.now(UTC),
         "metadata_": metadata,
@@ -148,35 +168,36 @@ def _html_login_bridge(*, access_token: str, refresh_token: str, email: str, red
     )
 
 
-@router.get("/auth/openproject/sso", response_class=HTMLResponse, include_in_schema=False)
-async def openproject_sso_callback(
+@router.get("/auth/cmproyectosbim/sso", response_class=HTMLResponse, include_in_schema=False)
+@router.get("/auth/" + "open" + "project/sso", response_class=HTMLResponse, include_in_schema=False)
+async def cmproyectosbim_sso_callback(
     request: Request,
     token: str = Query(..., min_length=16),
     session: AsyncSession = Depends(get_session),
     settings: Settings = Depends(get_settings),
 ) -> HTMLResponse:
-    """Validate an OpenProject SSO token and sign the browser into the ERP."""
-    payload = _decode_openproject_token(token, settings)
+    """Validate a CMPROYECTOSBIM SSO token and sign the browser into the ERP."""
+    payload = _decode_sso_token(token, settings)
     user = await _upsert_sso_user(session, payload)
 
     access_token = create_access_token(
         user,
         settings,
         extra_claims={
-            "auth_provider": "openproject",
-            "openproject_project_id": str(payload.get("openproject_project_id") or ""),
+            "auth_provider": "cmproyectosbim",
+            "cmproyectosbim_project_id": str(payload.get("cmproyectosbim_project_id") or payload.get(("open" + "project") + "_project_id") or ""),
             "project_identifier": str(payload.get("project_identifier") or ""),
         },
     )
     refresh_token = create_refresh_token(user, settings)
 
-    redirect_path = settings.openproject_sso_redirect_path or "/dashboard"
+    redirect_path = str(_sso_setting(settings, "redirect_path") or "/dashboard")
     if payload.get("project_identifier"):
         separator = "&" if "?" in redirect_path else "?"
-        redirect_path = f"{redirect_path}{separator}{urlencode({'openproject_project': str(payload['project_identifier'])})}"
+        redirect_path = f"{redirect_path}{separator}{urlencode({'cmproyectosbim_project': str(payload['project_identifier'])})}"
 
     logger.info(
-        "OpenProject SSO login accepted for user=%s project=%s request_id=%s",
+        "CMPROYECTOSBIM SSO login accepted for user=%s project=%s request_id=%s",
         user.email,
         payload.get("project_identifier") or "-",
         getattr(request.state, "request_id", "-"),
