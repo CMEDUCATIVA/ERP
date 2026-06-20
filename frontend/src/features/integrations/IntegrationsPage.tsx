@@ -88,6 +88,8 @@ interface ConnectorField {
   label: string;
   placeholder: string;
   type?: string;
+  defaultValue?: string;
+  optional?: boolean;
 }
 
 interface SetupStep {
@@ -326,15 +328,47 @@ const CONNECTORS: ConnectorDef[] = [
         label: 'URL de CMPROYECTOSBIM',
         placeholder: 'https://cmproyectos.cmeducativa.es',
       },
+      {
+        key: 'sso_secret',
+        label: 'Secreto SSO',
+        placeholder: 'Genera o pega el mismo secreto usado por erp_sync',
+        type: 'password',
+      },
+      {
+        key: 'sso_issuer',
+        label: 'Issuer SSO',
+        placeholder: 'cmproyectosbim',
+        defaultValue: 'cmproyectosbim',
+      },
+      {
+        key: 'sso_audience',
+        label: 'Audience SSO',
+        placeholder: 'cmproyectos-erp',
+        defaultValue: 'cmproyectos-erp',
+      },
+      {
+        key: 'sso_redirect_path',
+        label: 'Ruta despues del acceso',
+        placeholder: '/dashboard',
+        defaultValue: '/dashboard',
+      },
+      {
+        key: 'sso_token_ttl',
+        label: 'Duracion del token en segundos',
+        placeholder: '120',
+        defaultValue: '120',
+        type: 'number',
+      },
     ],
     setupSteps: [
       { text: 'En CMPROYECTOSBIM, habilita el modulo erp_sync del proyecto.' },
-      { text: 'En Administracion > CM ERP, configura la URL del ERP y activa SSO.' },
-      { text: 'Usa el mismo secreto SSO en CMPROYECTOSBIM y en las variables del ERP.' },
-      { text: 'Guarda este conector para documentar el acceso desde CMPROYECTOSBIM.' },
+      { text: 'Genera un secreto SSO aqui y copia el mismo valor en Administracion > CM ERP.' },
+      { text: 'Guarda esta conexion con un usuario administrador del ERP.' },
+      { text: 'Guarda este conector para que el ERP valide el acceso desde CMPROYECTOSBIM.' },
+      { text: 'Prueba el acceso desde el modulo CM ERP de un proyecto.' },
     ],
     infoText:
-      'Variables requeridas en el servidor ERP: CMPROYECTOSBIM_SSO_ENABLED=true y CMPROYECTOSBIM_SSO_SECRET con el mismo valor usado por erp_sync.',
+      'Esta configuracion queda guardada en el ERP. Las variables de entorno solo se usan como respaldo si no existe un conector activo.',
   },
   {
     type: 'webhook' as IntegrationType,
@@ -485,6 +519,15 @@ function fetchConfigs(): Promise<IntegrationConfigListResponse> {
   return apiGet('/v1/integrations/configs/');
 }
 
+function generateSsoSecret(): string {
+  const bytes = new Uint8Array(48);
+  window.crypto.getRandomValues(bytes);
+  return btoa(String.fromCharCode(...bytes))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
+}
+
 /* ── Info Popover ─────────────────────────────────────────────────────── */
 
 function InfoPopover({
@@ -590,7 +633,7 @@ function ConnectModal({
   const addToast = useToastStore((s) => s.addToast);
   const [name, setName] = useState(connector.defaultName);
   const [fieldValues, setFieldValues] = useState<Record<string, string>>(() =>
-    Object.fromEntries(connector.fields.map((f) => [f.key, '']))
+    Object.fromEntries(connector.fields.map((f) => [f.key, f.defaultValue ?? '']))
   );
   const [selectedEvents, setSelectedEvents] = useState<string[]>(
     connector.eventOptions ? [] : ['*']
@@ -619,7 +662,7 @@ function ConnectModal({
   const handleTest = useCallback(async () => {
     // Validate all fields are filled before testing
     for (const f of connector.fields) {
-      if (f.key === 'signing_secret') continue; // optional field
+      if (f.optional || f.key === 'signing_secret') continue; // optional field
       if (!fieldValues[f.key]?.trim()) {
         addToast({
           type: 'error',
@@ -665,7 +708,7 @@ function ConnectModal({
   const handleSave = useCallback(async () => {
     // Validate all fields are filled
     for (const f of connector.fields) {
-      if (f.key === 'signing_secret') continue; // optional field
+      if (f.optional || f.key === 'signing_secret') continue; // optional field
       if (!fieldValues[f.key]?.trim()) {
         addToast({
           type: 'error',
@@ -783,6 +826,19 @@ function ConnectModal({
               }
               placeholder={field.placeholder}
             />
+            {field.key === 'sso_secret' && (
+              <div className="mt-2">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() =>
+                    setFieldValues((prev) => ({ ...prev, sso_secret: generateSsoSecret() }))
+                  }
+                >
+                  {t('integrations.generate_sso_secret', 'Generar secreto SSO')}
+                </Button>
+              </div>
+            )}
           </div>
         ))}
 

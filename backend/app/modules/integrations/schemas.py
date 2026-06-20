@@ -48,6 +48,7 @@ _SECRET_CONFIG_KEYS: frozenset[str] = frozenset(
         "api_key",  # Generic third-party API key
         "api_token",  # Synonym
         "secret",  # Generic shared-secret
+        "sso_secret",  # CMPROYECTOSBIM SSO shared secret
         "client_secret",  # OAuth2 client secret
         "smtp_password",  # Email connector password
         "password",  # Generic password field

@@ -267,15 +267,18 @@ async def _dispatch_integration_test(itype: str, cfg: dict) -> TestNotificationR
 
         elif itype == "cmproyectosbim":
             cmproyectosbim_url = cfg.get("cmproyectosbim_url", "")
+            sso_secret = cfg.get("sso_secret", "")
             if not cmproyectosbim_url:
                 return TestNotificationResponse(success=False, message="Missing cmproyectosbim_url in config")
+            if not sso_secret:
+                return TestNotificationResponse(success=False, message="Missing sso_secret in config")
             try:
                 await resolve_and_validate_external_url(cmproyectosbim_url)
             except UnsafeUrlError as exc:
                 return TestNotificationResponse(success=False, message=f"URL blocked: {exc}")
             return TestNotificationResponse(
                 success=True,
-                message="CMPROYECTOSBIM URL is valid. SSO is verified by the ERP callback.",
+                message="CMPROYECTOSBIM URL and SSO settings are valid.",
             )
 
         else:
@@ -442,15 +445,18 @@ async def test_integration_config(
 
         elif itype == "cmproyectosbim":
             cmproyectosbim_url = cfg.get("cmproyectosbim_url", "")
+            sso_secret = cfg.get("sso_secret", "")
             if not cmproyectosbim_url:
                 return TestNotificationResponse(success=False, message="Missing cmproyectosbim_url in config")
+            if not sso_secret:
+                return TestNotificationResponse(success=False, message="Missing sso_secret in config")
             try:
                 await resolve_and_validate_external_url(cmproyectosbim_url)
             except UnsafeUrlError as exc:
                 return TestNotificationResponse(success=False, message=f"URL blocked: {exc}")
             return TestNotificationResponse(
                 success=True,
-                message="CMPROYECTOSBIM URL is valid. SSO is verified by the ERP callback.",
+                message="CMPROYECTOSBIM URL and SSO settings are valid.",
             )
 
         else:

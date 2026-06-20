@@ -19,11 +19,12 @@ from urllib.parse import urlencode
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse
 from jose import JWTError, jwt
-from sqlalchemy import update
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_settings
 from app.dependencies import get_session
+from app.modules.integrations.models import IntegrationConfig
 from app.modules.users.models import User
 from app.modules.users.repository import UserRepository
 from app.modules.users.service import create_access_token, create_refresh_token, hash_password
@@ -51,10 +52,35 @@ def _sso_setting(settings: Settings, name: str) -> Any:
     return legacy_value
 
 
-def _decode_sso_token(token: str, settings: Settings) -> dict[str, Any]:
-    if not _sso_setting(settings, "enabled"):
+async def _load_db_sso_config(session: AsyncSession) -> dict[str, Any]:
+    result = await session.execute(
+        select(IntegrationConfig)
+        .join(User, IntegrationConfig.user_id == User.id)
+        .where(
+            IntegrationConfig.integration_type == "cmproyectosbim",
+            IntegrationConfig.is_active.is_(True),
+            User.role == "admin",
+        )
+        .order_by(IntegrationConfig.updated_at.desc())
+        .limit(1)
+    )
+    config = result.scalar_one_or_none()
+    return dict(config.config or {}) if config else {}
+
+
+def _effective_sso_value(settings: Settings, db_config: dict[str, Any], name: str) -> Any:
+    db_key = f"sso_{name}"
+    value = db_config.get(db_key)
+    if value not in {"", False, None}:
+        return value
+    return _sso_setting(settings, name)
+
+
+def _decode_sso_token(token: str, settings: Settings, db_config: dict[str, Any]) -> dict[str, Any]:
+    db_has_secret = bool(str(db_config.get("sso_secret") or "").strip())
+    if not db_has_secret and not _sso_setting(settings, "enabled"):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="CMPROYECTOSBIM SSO is not enabled")
-    secret = str(_sso_setting(settings, "secret") or "").strip()
+    secret = str(_effective_sso_value(settings, db_config, "secret") or "").strip()
     if not secret:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="CMPROYECTOSBIM SSO is not configured")
 
@@ -63,7 +89,7 @@ def _decode_sso_token(token: str, settings: Settings) -> dict[str, Any]:
             token,
             secret,
             algorithms=["HS256"],
-            audience=str(_sso_setting(settings, "audience")),
+            audience=str(_effective_sso_value(settings, db_config, "audience") or "cmproyectos-erp"),
         )
     except JWTError as exc:
         logger.warning("CMPROYECTOSBIM SSO token rejected: %s", exc)
@@ -74,7 +100,7 @@ def _decode_sso_token(token: str, settings: Settings) -> dict[str, Any]:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="SSO token is missing a valid email")
     issuer = str(payload.get("iss") or "")
     legacy_issuer = "cmproyectos-" + "open" + "project"
-    allowed_issuers = {str(_sso_setting(settings, "issuer") or ""), legacy_issuer}
+    allowed_issuers = {str(_effective_sso_value(settings, db_config, "issuer") or ""), legacy_issuer}
     if issuer not in allowed_issuers:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid CMPROYECTOSBIM SSO issuer")
     return payload
@@ -177,7 +203,8 @@ async def cmproyectosbim_sso_callback(
     settings: Settings = Depends(get_settings),
 ) -> HTMLResponse:
     """Validate a CMPROYECTOSBIM SSO token and sign the browser into the ERP."""
-    payload = _decode_sso_token(token, settings)
+    db_config = await _load_db_sso_config(session)
+    payload = _decode_sso_token(token, settings, db_config)
     user = await _upsert_sso_user(session, payload)
 
     access_token = create_access_token(
@@ -191,7 +218,7 @@ async def cmproyectosbim_sso_callback(
     )
     refresh_token = create_refresh_token(user, settings)
 
-    redirect_path = str(_sso_setting(settings, "redirect_path") or "/dashboard")
+    redirect_path = str(_effective_sso_value(settings, db_config, "redirect_path") or "/dashboard")
     if payload.get("project_identifier"):
         separator = "&" if "?" in redirect_path else "?"
         redirect_path = f"{redirect_path}{separator}{urlencode({'cmproyectosbim_project': str(payload['project_identifier'])})}"
