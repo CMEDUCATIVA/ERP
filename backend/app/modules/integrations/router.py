@@ -265,6 +265,19 @@ async def _dispatch_integration_test(itype: str, cfg: dict) -> TestNotificationR
                 template_params=[message] if message else None,
             )
 
+        elif itype == "openproject":
+            openproject_url = cfg.get("openproject_url", "")
+            if not openproject_url:
+                return TestNotificationResponse(success=False, message="Missing openproject_url in config")
+            try:
+                await resolve_and_validate_external_url(openproject_url)
+            except UnsafeUrlError as exc:
+                return TestNotificationResponse(success=False, message=f"URL blocked: {exc}")
+            return TestNotificationResponse(
+                success=True,
+                message="OpenProject URL is valid. SSO is verified by /auth/openproject/sso.",
+            )
+
         else:
             return TestNotificationResponse(
                 success=False,
@@ -425,6 +438,19 @@ async def test_integration_config(
                 template_name=cfg.get("template_name", "erp_notification"),
                 template_language=cfg.get("template_language", "en"),
                 template_params=[message] if message else None,
+            )
+
+        elif itype == "openproject":
+            openproject_url = cfg.get("openproject_url", "")
+            if not openproject_url:
+                return TestNotificationResponse(success=False, message="Missing openproject_url in config")
+            try:
+                await resolve_and_validate_external_url(openproject_url)
+            except UnsafeUrlError as exc:
+                return TestNotificationResponse(success=False, message=f"URL blocked: {exc}")
+            return TestNotificationResponse(
+                success=True,
+                message="OpenProject URL is valid. SSO is verified by /auth/openproject/sso.",
             )
 
         else:

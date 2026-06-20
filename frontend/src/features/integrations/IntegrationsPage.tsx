@@ -55,7 +55,8 @@ type IntegrationType =
   | 'discord'
   | 'whatsapp'
   | 'email'
-  | 'webhook';
+  | 'webhook'
+  | 'openproject';
 
 interface IntegrationConfig {
   id: string;
@@ -310,6 +311,33 @@ const CONNECTORS: ConnectorDef[] = [
     eventOptions: AVAILABLE_EVENTS,
   },
   {
+    type: 'openproject',
+    nameKey: 'integrations.openproject',
+    defaultName: 'OpenProject / CMProyectos BIM',
+    descKey: 'integrations.openproject_desc',
+    defaultDesc: 'Single sign-on from CMProyectos BIM/OpenProject into this ERP.',
+    icon: Workflow,
+    color: 'bg-[#1F4E8C]',
+    category: 'automation',
+    status: 'available',
+    fields: [
+      {
+        key: 'openproject_url',
+        label: 'OpenProject URL',
+        placeholder: 'https://cmproyectos.cmeducativa.es',
+      },
+    ],
+    setupSteps: [
+      { text: 'In OpenProject, enable the erp_sync project module.' },
+      { text: 'In OpenProject Administration > CM ERP, set the ERP URL and enable SSO.' },
+      { text: 'Use the same SSO secret in OpenProject and in this ERP server environment.' },
+      { text: 'The callback URL in this ERP is /auth/openproject/sso.' },
+      { text: 'Save this connector to document the OpenProject endpoint in Integrations.' },
+    ],
+    infoText:
+      'Server variables required: OPENPROJECT_SSO_ENABLED=true and OPENPROJECT_SSO_SECRET with the same value used by the OpenProject erp_sync plugin.',
+  },
+  {
     type: 'webhook' as IntegrationType,
     nameKey: 'integrations.n8n',
     defaultName: 'n8n',
@@ -435,6 +463,7 @@ const CONNECTABLE_TYPES: IntegrationType[] = [
   'discord',
   'email',
   'webhook',
+  'openproject',
 ];
 
 const CATEGORY_LABELS: Record<ConnectorCategory, { key: string; defaultLabel: string }> = {
@@ -992,8 +1021,8 @@ export function IntegrationsPage() {
                         </div>
                       </div>
                       <div className="flex items-center gap-1">
-                        {/* Info popover for info-only connectors */}
-                        {isInfoOnly && connector.infoText && (
+                        {/* Info popover for connector setup notes */}
+                        {connector.infoText && (
                           <InfoPopover
                             text={connector.infoText}
                             externalUrl={connector.externalUrl}

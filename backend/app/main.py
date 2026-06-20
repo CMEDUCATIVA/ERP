@@ -1309,6 +1309,13 @@ def create_app() -> FastAPI:
 
     app.include_router(desktop_auth_router, prefix="/api/v1/auth")
 
+    # OpenProject/CMProyectos BIM SSO callback. This is mounted outside /api
+    # because OpenProject opens it directly in the browser; otherwise the SPA
+    # fallback would serve index.html and ignore the SSO token.
+    from app.modules.integrations.openproject_sso import router as openproject_sso_router
+
+    app.include_router(openproject_sso_router)
+
     # Module management API (list / enable / disable)
     from app.core.module_router import router as module_mgmt_router
 

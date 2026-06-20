@@ -265,6 +265,15 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 60
     jwt_refresh_expire_days: int = 30
+    # OpenProject / CMProyectos BIM SSO. The external OpenProject plugin signs
+    # a short-lived HS256 token with this shared secret and redirects the user
+    # to /auth/openproject/sso. Keep this secret distinct from JWT_SECRET so
+    # rotating the ERP session key does not require reconfiguring OpenProject.
+    openproject_sso_enabled: bool = False
+    openproject_sso_secret: str = ""
+    openproject_sso_issuer: str = "cmproyectos-openproject"
+    openproject_sso_audience: str = "cmproyectos-erp"
+    openproject_sso_redirect_path: str = "/dashboard"
     # Default role handed to users who self-register after the very first
     # (bootstrap) user. ``viewer`` is the safe default - read-only across
     # the app. Can be raised to ``editor`` or ``manager`` for trusted
