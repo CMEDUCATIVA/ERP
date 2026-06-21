@@ -22,6 +22,7 @@ import {
   type Project,
   type WizardPreset,
   type ProfileSpec,
+  type CmproyectosbimSetupContext,
 } from './api';
 import { useTelemetry } from '@/shared/lib/telemetry';
 
@@ -327,12 +328,14 @@ interface CreateProjectModalProps {
    * forked — this is a mode prop, the steps/UX are identical.
    */
   editProjectId?: string;
+  ssoSetup?: CmproyectosbimSetupContext;
 }
 
 export function CreateProjectModal({
   open,
   onClose,
   editProjectId,
+  ssoSetup,
 }: CreateProjectModalProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -340,6 +343,7 @@ export function CreateProjectModal({
   const addToast = useToastStore((s) => s.addToast);
   const { track } = useTelemetry();
   const isEdit = !!editProjectId;
+  const isRequiredSsoSetup = !!ssoSetup?.required_setup;
 
   // Which create flow we're in. Always starts on the chooser so the
   // user is offered the wizard vs. the old single-window form.
@@ -455,15 +459,26 @@ export function CreateProjectModal({
         document.activeElement instanceof HTMLElement
           ? document.activeElement
           : null;
-      setMode('choose');
-      setStep(1);
-      setMaxStep(1);
+      setMode(isRequiredSsoSetup ? 'wizard' : 'choose');
+      setStep(isRequiredSsoSetup ? 3 : 1);
+      setMaxStep(isRequiredSsoSetup ? 3 : 1);
       setConfirmingClose(false);
-      setForm({ name: '', description: '', region: '', classification_standard: '', currency: '', locale: 'en' });
-      setCustomRegion('');
+      const suppliedRegion = ssoSetup?.region?.trim() || '';
+      const knownRegion = REGION_GROUPS.some((group) =>
+        group.options.some((option) => option.value === suppliedRegion),
+      );
+      setForm({
+        name: ssoSetup?.project_name || '',
+        description: ssoSetup?.project_description || '',
+        region: suppliedRegion ? (knownRegion ? suppliedRegion : '__custom__') : '',
+        classification_standard: ssoSetup?.classification_standard || '',
+        currency: ssoSetup?.currency || '',
+        locale: ssoSetup?.locale || 'en',
+      });
+      setCustomRegion(suppliedRegion && !knownRegion ? suppliedRegion : '');
       setCustomStandard('');
       setCustomCurrency('');
-      setRegionalFactorStr('1.00');
+      setRegionalFactorStr(String(ssoSetup?.regional_factor || 1));
       setDuplicateConfirmed(false);
       setPreset('full_construction_lifecycle');
       setSize('medium');
@@ -487,9 +502,9 @@ export function CreateProjectModal({
       setPrefilledFor(null);
       // Create flow opens the wizard funnel here; edit flow emits
       // `setup_rerun` from the prefill effect instead.
-      if (!isEdit) track('wizard_started', { mode: 'create' });
+      if (!isEdit) track('wizard_started', { mode: isRequiredSsoSetup ? 'cmproyectosbim_sso' : 'create' });
     }
-  }, [open, isEdit, track]);
+  }, [open, isEdit, isRequiredSsoSetup, ssoSetup, track]);
 
   const { data: existingProjects = [] } = useQuery<Project[]>({
     queryKey: ['projects'],
@@ -728,6 +743,14 @@ export function CreateProjectModal({
         return { id: editProjectId } as Project;
       }
 
+      if (ssoSetup) {
+        return projectsApi.completeCmproyectosbimSetup(
+          ssoSetup.setup_token,
+          data,
+          buildSpec(),
+        );
+      }
+
       const project = await projectsApi.create(data);
       // Best-effort profile apply — a failure here must not lose the
       // already-created project; we surface a soft warning instead.
@@ -786,6 +809,7 @@ export function CreateProjectModal({
   });
 
   const requestClose = () => {
+    if (isRequiredSsoSetup) return;
     if (mutation.isPending) return;
     if (dirty) {
       setConfirmingClose(true);
@@ -906,6 +930,10 @@ export function CreateProjectModal({
   const onKeyDownModal = (e: KeyboardEvent<HTMLDivElement>) => {
     const tag = (e.target as HTMLElement).tagName;
     if (e.key === 'Escape') {
+      if (isRequiredSsoSetup) {
+        e.preventDefault();
+        return;
+      }
       // A focused native <select> uses Escape to close its own
       // dropdown — don't also tear down the wizard in that case.
       if (tag === 'SELECT') return;
@@ -948,7 +976,7 @@ export function CreateProjectModal({
     >
       <div
         className="absolute inset-0 bg-black/70 backdrop-blur-lg animate-fade-in"
-        onClick={requestClose}
+        onClick={isRequiredSsoSetup ? undefined : requestClose}
         aria-hidden
       />
 
@@ -989,13 +1017,15 @@ export function CreateProjectModal({
               </p>
             </div>
           </div>
-          <button
-            onClick={requestClose}
-            aria-label={t('common.close', { defaultValue: 'Close' })}
-            className="flex h-8 w-8 items-center justify-center rounded-lg text-content-tertiary hover:text-content-primary hover:bg-surface-hover transition-colors"
-          >
-            <X size={18} />
-          </button>
+          {!isRequiredSsoSetup && (
+            <button
+              onClick={requestClose}
+              aria-label={t('common.close', { defaultValue: 'Close' })}
+              className="flex h-8 w-8 items-center justify-center rounded-lg text-content-tertiary hover:text-content-primary hover:bg-surface-hover transition-colors"
+            >
+              <X size={18} />
+            </button>
+          )}
         </div>
 
         {/* Stepper — wizard only. grid-cols-N guarantees equal,
@@ -1988,7 +2018,9 @@ export function CreateProjectModal({
             variant="secondary"
             type="button"
             onClick={
-              mode === 'choose'
+              isRequiredSsoSetup && step === 1
+                ? () => window.location.assign(ssoSetup?.return_url || '/')
+                : mode === 'choose'
                 ? requestClose
                 : mode === 'classic'
                   ? () => setMode('choose')
@@ -2000,7 +2032,9 @@ export function CreateProjectModal({
             }
             disabled={mutation.isPending}
           >
-            {mode === 'choose'
+            {isRequiredSsoSetup && step === 1
+              ? t('integrations.back_to_cmproyectosbim', { defaultValue: 'Back to CMPROYECTOSBIM' })
+              : mode === 'choose'
               ? t('common.cancel')
               : (step === 1 && isEdit)
                 ? t('common.cancel')

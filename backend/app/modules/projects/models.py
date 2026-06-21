@@ -78,6 +78,12 @@ class Project(Base):
     # value; the empty default only applies to bare ORM constructions.
     currency: Mapped[str] = mapped_column(String(10), nullable=False, default="")
     locale: Mapped[str] = mapped_column(String(10), nullable=False, default="de")
+    regional_factor: Mapped[float] = mapped_column(
+        Float,
+        nullable=False,
+        default=1.0,
+        server_default="1.0",
+    )
     validation_rule_sets: Mapped[list] = mapped_column(  # type: ignore[assignment]
         JSON,
         nullable=False,

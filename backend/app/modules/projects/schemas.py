@@ -325,6 +325,7 @@ class ProjectCreate(BaseModel):
         examples=["EUR"],
     )
     locale: str = Field(default="en", max_length=10, description="UI locale code (e.g. en, de, fr)")
+    regional_factor: float = Field(default=1.0, ge=0.5, le=2.0)
     validation_rule_sets: list[str] = Field(
         default_factory=lambda: ["boq_quality"],
         description="List of validation rule set IDs to apply (e.g. boq_quality, din276, gaeb)",
@@ -480,6 +481,7 @@ class ProjectUpdate(BaseModel):
     classification_standard: str | None = Field(default=None, max_length=100)
     currency: str | None = Field(default=None, max_length=10)
     locale: str | None = Field(default=None, max_length=10)
+    regional_factor: float | None = Field(default=None, ge=0.5, le=2.0)
     validation_rule_sets: list[str] | None = None
     compliance_rule_packs: list[str] | None = None
     metadata: dict[str, Any] | None = None
@@ -613,6 +615,7 @@ class ProjectResponse(BaseModel):
     classification_standard: str
     currency: str
     locale: str
+    regional_factor: float = 1.0
     validation_rule_sets: list[str]
     compliance_rule_packs: list[str] = Field(default_factory=lambda: ["universal"])
     status: str

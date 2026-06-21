@@ -7,8 +7,9 @@ Tables:
 """
 
 import uuid
+from datetime import datetime
 
-from sqlalchemy import JSON, Boolean, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import GUID, Base
@@ -151,3 +152,50 @@ class IntegrationConfig(Base):
     def __repr__(self) -> str:
         status = "active" if self.is_active else "disabled"
         return f"<IntegrationConfig {self.integration_type}:{self.name} [{status}]>"
+
+
+class CmproyectosbimProjectMapping(Base):
+    """Persistent one-to-one link between a CMPROYECTOSBIM and ERP project."""
+
+    __tablename__ = "oe_integrations_cmproyectosbim_project"
+    __table_args__ = (
+        UniqueConstraint(
+            "provider",
+            "external_project_id",
+            name="uq_cmproyectosbim_external_project",
+        ),
+        UniqueConstraint("erp_project_id", name="uq_cmproyectosbim_erp_project"),
+    )
+
+    provider: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        default="cmproyectosbim",
+        server_default="cmproyectosbim",
+    )
+    external_project_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    external_project_identifier: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    erp_project_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(),
+        ForeignKey("oe_projects_project.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    last_sso_at: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    metadata_: Mapped[dict] = mapped_column(
+        "metadata",
+        JSON,
+        nullable=False,
+        default=dict,
+        server_default="{}",
+    )
+
+
+class CmproyectosbimConsumedJti(Base):
+    """Replay-protection ledger for short-lived inbound SSO JWT identifiers."""
+
+    __tablename__ = "oe_integrations_cmproyectosbim_jti"
+    __table_args__ = (UniqueConstraint("jti", name="uq_cmproyectosbim_sso_jti"),)
+
+    jti: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)

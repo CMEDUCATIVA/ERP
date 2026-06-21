@@ -28,6 +28,7 @@ export interface Project {
   classification_standard: string;
   currency: string;
   locale: string;
+  regional_factor?: number;
   validation_rule_sets: string[];
   /** Item #27 — compliance rule packs enforced at workflow gates. */
   compliance_rule_packs?: string[];
@@ -194,6 +195,21 @@ export interface ProfileSpec {
   manual_overrides?: Record<string, boolean>;
 }
 
+export interface CmproyectosbimSetupContext {
+  setup_token: string;
+  project_name: string;
+  project_description: string;
+  region: string;
+  currency: string;
+  locale: string;
+  classification_standard: string;
+  regional_factor: number;
+  external_project_id: string;
+  project_identifier: string;
+  return_url: string;
+  required_setup: boolean;
+}
+
 export interface ProjectModule {
   module_name: string;
   enabled: boolean;
@@ -230,6 +246,20 @@ export const projectsApi = {
   list: () => apiGet<Project[]>('/v1/projects/'),
   get: (id: string) => apiGet<Project>(`/v1/projects/${id}`),
   create: (data: CreateProjectData) => apiPost<Project>('/v1/projects/', data),
+  getCmproyectosbimSetup: (setupToken: string) =>
+    apiGet<CmproyectosbimSetupContext>(
+      `/v1/integrations/cmproyectosbim/setup/context?setup_token=${encodeURIComponent(setupToken)}`,
+    ),
+  completeCmproyectosbimSetup: (
+    setupToken: string,
+    project: CreateProjectData,
+    profile: ProfileSpec,
+  ) =>
+    apiPost<Project>('/v1/integrations/cmproyectosbim/setup/complete', {
+      setup_token: setupToken,
+      project,
+      profile,
+    }),
   update: (id: string, data: UpdateProjectData) =>
     apiPatch<Project>(`/v1/projects/${id}`, data),
   archive: (id: string) => apiDelete(`/v1/projects/${id}`),

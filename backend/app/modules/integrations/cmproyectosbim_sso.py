@@ -12,19 +12,31 @@ import json
 import logging
 import os
 import secrets
-from datetime import UTC, datetime
+import uuid
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse
 from jose import JWTError, jwt
-from sqlalchemy import select, update
+from pydantic import BaseModel
+from sqlalchemy import delete, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_settings
-from app.dependencies import get_session
-from app.modules.integrations.models import IntegrationConfig
+from app.dependencies import CurrentUserId, get_session
+from app.modules.integrations.models import (
+    CmproyectosbimConsumedJti,
+    CmproyectosbimProjectMapping,
+    IntegrationConfig,
+)
+from app.modules.projects.models import Project
+from app.modules.projects.profile_service import apply_profile
+from app.modules.projects.schemas import ProfileSpec, ProjectCreate, ProjectResponse
+from app.modules.projects.service import ProjectService
+from app.modules.teams.models import Team, TeamMembership
 from app.modules.users.models import User
 from app.modules.users.repository import UserRepository
 from app.modules.users.service import create_access_token, create_refresh_token, hash_password
@@ -32,11 +44,48 @@ from app.modules.users.service import create_access_token, create_refresh_token,
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["CMPROYECTOSBIM SSO"])
+PROVIDER = "cmproyectosbim"
+SETUP_TOKEN_TTL_MINUTES = 30
+
+
+class CmproyectosbimSetupContext(BaseModel):
+    setup_token: str
+    project_name: str
+    project_description: str = ""
+    region: str = ""
+    currency: str = ""
+    locale: str = "en"
+    classification_standard: str = ""
+    regional_factor: float = 1.0
+    external_project_id: str
+    project_identifier: str = ""
+    return_url: str
+    required_setup: bool = True
+
+
+class CmproyectosbimSetupComplete(BaseModel):
+    setup_token: str
+    project: ProjectCreate
+    profile: ProfileSpec
 
 
 def _normalise_role(value: Any) -> str:
     role = str(value or "viewer").strip().lower()
     return role if role in {"viewer", "editor", "manager", "admin"} else "viewer"
+
+
+def _project_membership_role(payload: dict[str, Any]) -> str:
+    permissions = {str(value) for value in payload.get("cmproyectosbim_permissions") or []}
+    if "manage_erp_sync" in permissions or payload.get("admin"):
+        return "project_manager"
+    if "edit_erp_sync" in permissions:
+        return "estimator"
+    return "viewer"
+
+
+def _can_create_project(payload: dict[str, Any]) -> bool:
+    permissions = {str(value) for value in payload.get("cmproyectosbim_permissions") or []}
+    return bool(payload.get("admin")) or "manage_erp_sync" in permissions
 
 
 def _sso_setting(settings: Settings, name: str) -> Any:
@@ -106,6 +155,27 @@ def _decode_sso_token(token: str, settings: Settings, db_config: dict[str, Any])
     return payload
 
 
+async def _consume_jti(session: AsyncSession, payload: dict[str, Any]) -> None:
+    jti = str(payload.get("jti") or "").strip()
+    exp = payload.get("exp")
+    if not jti or not exp:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="SSO token is missing replay protection")
+
+    now = datetime.now(UTC)
+    await session.execute(delete(CmproyectosbimConsumedJti).where(CmproyectosbimConsumedJti.expires_at < now))
+    session.add(
+        CmproyectosbimConsumedJti(
+            jti=jti,
+            expires_at=datetime.fromtimestamp(int(exp), tz=UTC),
+        )
+    )
+    try:
+        await session.flush()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="SSO token has already been used") from exc
+
+
 async def _upsert_sso_user(session: AsyncSession, payload: dict[str, Any]) -> User:
     repo = UserRepository(session)
     email = str(payload["email"]).strip().lower()
@@ -113,6 +183,8 @@ async def _upsert_sso_user(session: AsyncSession, payload: dict[str, Any]) -> Us
 
     role = _normalise_role(payload.get("erp_role") or ("admin" if payload.get("admin") else "viewer"))
     full_name = str(payload.get("name") or payload.get("login") or email.split("@")[0]).strip()
+    locale = str(payload.get("user_locale") or "es").strip()[:10] or "es"
+    timezone = str(payload.get("user_timezone") or "UTC").strip()[:50] or "UTC"
     legacy_prefix = "open" + "project"
     cmproyectosbim_meta = {
         "provider": "cmproyectosbim",
@@ -131,7 +203,8 @@ async def _upsert_sso_user(session: AsyncSession, payload: dict[str, Any]) -> Us
             hashed_password=hash_password(secrets.token_urlsafe(32)),
             full_name=full_name,
             role=role,
-            locale="es",
+            locale=locale,
+            timezone=timezone,
             is_active=True,
             last_login_at=datetime.now(UTC),
             metadata_={"sso": cmproyectosbim_meta},
@@ -147,6 +220,8 @@ async def _upsert_sso_user(session: AsyncSession, payload: dict[str, Any]) -> Us
         "last_login_at": datetime.now(UTC),
         "metadata_": metadata,
         "role": "admin" if user.role == "admin" else role,
+        "locale": locale,
+        "timezone": timezone,
     }
     if full_name and not user.full_name:
         values["full_name"] = full_name
@@ -157,6 +232,103 @@ async def _upsert_sso_user(session: AsyncSession, payload: dict[str, Any]) -> Us
     await session.flush()
     await session.refresh(user)
     return user
+
+
+async def _find_mapping(session: AsyncSession, external_project_id: str) -> CmproyectosbimProjectMapping | None:
+    return (
+        await session.execute(
+            select(CmproyectosbimProjectMapping).where(
+                CmproyectosbimProjectMapping.provider == PROVIDER,
+                CmproyectosbimProjectMapping.external_project_id == external_project_id,
+            )
+        )
+    ).scalar_one_or_none()
+
+
+async def _ensure_project_membership(
+    session: AsyncSession,
+    *,
+    project: Project,
+    user: User,
+    role: str,
+) -> None:
+    team = (
+        await session.execute(
+            select(Team).where(Team.project_id == project.id, Team.is_default.is_(True)).limit(1)
+        )
+    ).scalar_one_or_none()
+    if team is None:
+        team = (
+            await session.execute(select(Team).where(Team.project_id == project.id).limit(1))
+        ).scalar_one_or_none()
+    if team is None:
+        team = Team(project_id=project.id, name="Default Team", is_default=True)
+        session.add(team)
+        await session.flush()
+
+    membership = (
+        await session.execute(
+            select(TeamMembership).where(
+                TeamMembership.team_id == team.id,
+                TeamMembership.user_id == user.id,
+            )
+        )
+    ).scalar_one_or_none()
+    desired_role = "owner" if project.owner_id == user.id else role
+    if membership is None:
+        session.add(TeamMembership(team_id=team.id, user_id=user.id, role=desired_role))
+    elif membership.role != "owner":
+        membership.role = desired_role
+    await session.flush()
+
+
+def _return_url(db_config: dict[str, Any]) -> str:
+    value = str(db_config.get("cmproyectosbim_url") or "").strip().rstrip("/")
+    return value or "/"
+
+
+def _create_setup_token(
+    *,
+    user: User,
+    payload: dict[str, Any],
+    settings: Settings,
+    return_url: str,
+) -> str:
+    now = datetime.now(UTC)
+    claims = {
+        "iss": "openconstructionerp",
+        "sub": str(user.id),
+        "type": "cmproyectosbim_setup",
+        "iat": now,
+        "exp": now + timedelta(minutes=SETUP_TOKEN_TTL_MINUTES),
+        "return_url": return_url,
+        "origin": {
+            "external_project_id": str(payload.get("cmproyectosbim_project_id") or ""),
+            "project_identifier": str(payload.get("project_identifier") or ""),
+            "project_name": str(payload.get("project_name") or ""),
+            "project_description": str(payload.get("project_description") or ""),
+            "region": str(payload.get("default_project_region") or ""),
+            "currency": str(payload.get("default_project_currency") or ""),
+            "locale": str(payload.get("user_locale") or "en"),
+            "classification_standard": str(payload.get("default_project_classification_standard") or ""),
+            "regional_factor": payload.get("default_project_regional_factor") or 1.0,
+            "membership_role": _project_membership_role(payload),
+        },
+    }
+    return jwt.encode(claims, settings.jwt_secret, algorithm=settings.jwt_algorithm)
+
+
+def _decode_setup_token(token: str, settings: Settings, user_id: str) -> dict[str, Any]:
+    try:
+        payload = jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
+    except JWTError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid project setup token") from exc
+    if payload.get("type") != "cmproyectosbim_setup" or str(payload.get("sub")) != str(user_id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Project setup token does not belong to this user")
+    origin = payload.get("origin")
+    if not isinstance(origin, dict) or not str(origin.get("external_project_id") or ""):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Project setup context is incomplete")
+    return payload
 
 
 def _html_login_bridge(*, access_token: str, refresh_token: str, email: str, redirect_path: str) -> HTMLResponse:
@@ -206,7 +378,29 @@ async def cmproyectosbim_sso_callback(
     """Validate a CMPROYECTOSBIM SSO token and sign the browser into the ERP."""
     db_config = await _load_db_sso_config(session)
     payload = _decode_sso_token(token, settings, db_config)
+    await _consume_jti(session, payload)
     user = await _upsert_sso_user(session, payload)
+
+    external_project_id = str(payload.get("cmproyectosbim_project_id") or "").strip()
+    if not external_project_id:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="SSO token is missing a project ID")
+
+    mapping = await _find_mapping(session, external_project_id)
+    if mapping is not None:
+        project = await session.get(Project, mapping.erp_project_id)
+        if project is None:
+            await session.delete(mapping)
+            await session.flush()
+            mapping = None
+        else:
+            await _ensure_project_membership(
+                session,
+                project=project,
+                user=user,
+                role=_project_membership_role(payload),
+            )
+            mapping.external_project_identifier = str(payload.get("project_identifier") or "")
+            mapping.last_sso_at = datetime.now(UTC).isoformat()
 
     access_token = create_access_token(
         user,
@@ -219,10 +413,24 @@ async def cmproyectosbim_sso_callback(
     )
     refresh_token = create_refresh_token(user, settings)
 
-    redirect_path = str(_effective_sso_value(settings, db_config, "redirect_path") or "/dashboard")
-    if payload.get("project_identifier"):
-        separator = "&" if "?" in redirect_path else "?"
-        redirect_path = f"{redirect_path}{separator}{urlencode({'cmproyectosbim_project': str(payload['project_identifier'])})}"
+    if mapping is not None:
+        redirect_path = f"/projects/{mapping.erp_project_id}"
+    elif _can_create_project(payload):
+        setup_token = _create_setup_token(
+            user=user,
+            payload=payload,
+            settings=settings,
+            return_url=_return_url(db_config),
+        )
+        redirect_path = f"/projects?{urlencode({'cmproyectosbim_setup': setup_token, 'return_url': _return_url(db_config)})}"
+    else:
+        redirect_path = "/projects?" + urlencode(
+            {
+                "cmproyectosbim_pending": "1",
+                "project_name": str(payload.get("project_name") or ""),
+                "return_url": _return_url(db_config),
+            }
+        )
 
     logger.info(
         "CMPROYECTOSBIM SSO login accepted for user=%s project=%s request_id=%s",
@@ -236,3 +444,98 @@ async def cmproyectosbim_sso_callback(
         email=user.email,
         redirect_path=redirect_path,
     )
+
+
+@router.get("/api/v1/integrations/cmproyectosbim/setup/context", response_model=CmproyectosbimSetupContext)
+async def cmproyectosbim_setup_context(
+    user_id: CurrentUserId,
+    setup_token: str = Query(..., min_length=16),
+    settings: Settings = Depends(get_settings),
+) -> CmproyectosbimSetupContext:
+    payload = _decode_setup_token(setup_token, settings, user_id)
+    origin = payload["origin"]
+    return CmproyectosbimSetupContext(
+        setup_token=setup_token,
+        project_name=str(origin.get("project_name") or ""),
+        project_description=str(origin.get("project_description") or ""),
+        region=str(origin.get("region") or ""),
+        currency=str(origin.get("currency") or ""),
+        locale=str(origin.get("locale") or "en"),
+        classification_standard=str(origin.get("classification_standard") or ""),
+        regional_factor=float(origin.get("regional_factor") or 1.0),
+        external_project_id=str(origin["external_project_id"]),
+        project_identifier=str(origin.get("project_identifier") or ""),
+        return_url=str(payload.get("return_url") or "/"),
+    )
+
+
+@router.post(
+    "/api/v1/integrations/cmproyectosbim/setup/complete",
+    response_model=ProjectResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def cmproyectosbim_setup_complete(
+    body: CmproyectosbimSetupComplete,
+    user_id: CurrentUserId,
+    session: AsyncSession = Depends(get_session),
+    settings: Settings = Depends(get_settings),
+) -> ProjectResponse:
+    payload = _decode_setup_token(body.setup_token, settings, user_id)
+    origin = payload["origin"]
+    external_project_id = str(origin["external_project_id"])
+
+    mapping = await _find_mapping(session, external_project_id)
+    user = await session.get(User, uuid.UUID(str(user_id)))
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+    if mapping is not None:
+        existing = await session.get(Project, mapping.erp_project_id)
+        if existing is None:
+            await session.delete(mapping)
+            await session.flush()
+        else:
+            await _ensure_project_membership(
+                session,
+                project=existing,
+                user=user,
+                role=str(origin.get("membership_role") or "project_manager"),
+            )
+            return ProjectResponse.model_validate(existing)
+
+    project_service = ProjectService(session, settings)
+    project = await project_service.create_project(body.project, user.id)
+    metadata = dict(project.metadata_ or {})
+    metadata["cmproyectosbim"] = {
+        "provider": PROVIDER,
+        "external_project_id": external_project_id,
+        "project_identifier": str(origin.get("project_identifier") or ""),
+    }
+    project.metadata_ = metadata
+    await apply_profile(session, project.id, body.profile, user.id)
+    mapping = CmproyectosbimProjectMapping(
+        provider=PROVIDER,
+        external_project_id=external_project_id,
+        external_project_identifier=str(origin.get("project_identifier") or ""),
+        erp_project_id=project.id,
+        last_sso_at=datetime.now(UTC).isoformat(),
+    )
+    session.add(mapping)
+    await _ensure_project_membership(
+        session,
+        project=project,
+        user=user,
+        role="owner",
+    )
+    try:
+        await session.flush()
+    except IntegrityError as exc:
+        await session.rollback()
+        existing_mapping = await _find_mapping(session, external_project_id)
+        if existing_mapping is None:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Project mapping already exists") from exc
+        existing = await session.get(Project, existing_mapping.erp_project_id)
+        if existing is None:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Project mapping is invalid") from exc
+        return ProjectResponse.model_validate(existing)
+    await session.refresh(project)
+    return ProjectResponse.model_validate(project)

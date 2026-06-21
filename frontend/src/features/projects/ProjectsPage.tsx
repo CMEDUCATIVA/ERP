@@ -13,7 +13,7 @@ import { PageHeader } from '@/shared/ui/PageHeader';
 import { DismissibleInfo, IntroRichText } from '@/shared/ui/DismissibleInfo';
 import { useWidgetSettingsStore } from '@/stores/useWidgetSettingsStore';
 import { getIntlLocale } from '@/shared/lib/formatters';
-import { projectsApi, type Project } from './api';
+import { projectsApi, type CmproyectosbimSetupContext, type Project } from './api';
 import { apiGet, apiPatch, apiPost, apiDelete } from '@/shared/lib/api';
 import { useToastStore } from '@/stores/useToastStore';
 import { useProjectContextStore } from '@/stores/useProjectContextStore';
@@ -67,6 +67,22 @@ export function ProjectsPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const addToast = useToastStore((s) => s.addToast);
+  const ssoParams = useMemo(() => new URLSearchParams(location.search), [location.search]);
+  const cmproyectosbimSetupToken = ssoParams.get('cmproyectosbim_setup') || '';
+  const cmproyectosbimPending = ssoParams.get('cmproyectosbim_pending') === '1';
+  const pendingProjectName = ssoParams.get('project_name') || '';
+  const pendingReturnUrl = ssoParams.get('return_url') || '/';
+
+  const {
+    data: cmproyectosbimSetup,
+    isLoading: cmproyectosbimSetupLoading,
+    isError: cmproyectosbimSetupError,
+  } = useQuery<CmproyectosbimSetupContext>({
+    queryKey: ['cmproyectosbim-setup', cmproyectosbimSetupToken],
+    queryFn: () => projectsApi.getCmproyectosbimSetup(cmproyectosbimSetupToken),
+    enabled: !!cmproyectosbimSetupToken,
+    retry: false,
+  });
 
   // Create project modal
   const [createModalOpen, setCreateModalOpen] = useState(false);
@@ -77,6 +93,10 @@ export function ProjectsPage() {
       window.history.replaceState({}, '');
     }
   }, [location.state]);
+
+  useEffect(() => {
+    if (cmproyectosbimSetup) setCreateModalOpen(true);
+  }, [cmproyectosbimSetup]);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [filters, setFilters] = useLocalStorage('oe_projects_filters', {
@@ -954,9 +974,45 @@ export function ProjectsPage() {
       )}
 
       <CreateProjectModal
-        open={createModalOpen}
-        onClose={() => setCreateModalOpen(false)}
+        open={createModalOpen || !!cmproyectosbimSetup}
+        onClose={() => {
+          if (!cmproyectosbimSetup) setCreateModalOpen(false);
+        }}
+        ssoSetup={cmproyectosbimSetup}
       />
+
+      {(cmproyectosbimPending || cmproyectosbimSetupLoading || cmproyectosbimSetupError) && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-lg px-4">
+          <div className="w-full max-w-lg rounded-xl border border-border-light bg-surface-elevated p-6 text-center shadow-2xl">
+            <AlertTriangle size={32} className="mx-auto mb-3 text-amber-500" />
+            <h2 className="text-lg font-semibold text-content-primary">
+              {cmproyectosbimSetupLoading
+                ? t('integrations.loading_cmproyectosbim_project', { defaultValue: 'Loading CMPROYECTOSBIM project…' })
+                : cmproyectosbimSetupError
+                  ? t('integrations.invalid_cmproyectosbim_setup', { defaultValue: 'The project setup link is invalid or expired' })
+                  : t('integrations.cmproyectosbim_project_pending', { defaultValue: 'Project pending configuration' })}
+            </h2>
+            {!cmproyectosbimSetupLoading && (
+              <p className="mt-2 text-sm text-content-secondary">
+                {cmproyectosbimSetupError
+                  ? t('integrations.return_and_retry_cmproyectosbim', { defaultValue: 'Return to CMPROYECTOSBIM and open CM ERP again.' })
+                  : t('integrations.cmproyectosbim_admin_required', {
+                      defaultValue: '“{{project}}” must be configured by a project administrator before you can use it in CM ERP.',
+                      project: pendingProjectName || t('common.project', { defaultValue: 'This project' }),
+                    })}
+              </p>
+            )}
+            {!cmproyectosbimSetupLoading && (
+              <Button
+                className="mt-5"
+                onClick={() => window.location.assign(pendingReturnUrl)}
+              >
+                {t('integrations.back_to_cmproyectosbim', { defaultValue: 'Back to CMPROYECTOSBIM' })}
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1495,4 +1551,3 @@ function PinButton({ projectId }: { projectId: string }) {
     </button>
   );
 }
-

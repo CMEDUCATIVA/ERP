@@ -352,6 +352,7 @@ class ProjectService:
             classification_standard=data.classification_standard,
             currency=data.currency,
             locale=data.locale,
+            regional_factor=data.regional_factor,
             validation_rule_sets=data.validation_rule_sets,
             compliance_rule_packs=requested_packs,
             owner_id=owner_id,
