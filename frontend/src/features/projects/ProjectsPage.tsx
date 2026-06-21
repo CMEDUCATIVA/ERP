@@ -1067,7 +1067,12 @@ function ProjectCard({
       setConfirmDelete(false);
       queryClient.invalidateQueries({ queryKey: ['projects'] });
       queryClient.invalidateQueries({ queryKey: ['projects-switcher'] });
-      addToast({ type: 'success', title: t('projects.deleted', 'Project deleted successfully') });
+      addToast({
+        type: 'success',
+        title: t('projects.permanently_deleted', {
+          defaultValue: 'Project permanently deleted',
+        }),
+      });
       onDeleted?.();
     },
     onError: (e: Error) => {
@@ -1185,11 +1190,18 @@ function ProjectCard({
 
   return (
     <Card
-      hoverable
+      hoverable={project.status !== 'archived'}
       padding="none"
-      className="group cursor-pointer relative animate-card-in overflow-hidden rounded-xl bg-gradient-to-b from-surface-elevated to-surface-primary hover:shadow-xl hover:border-oe-blue/40 focus-within:ring-2 focus-within:ring-oe-blue/30 motion-safe:transition-all"
+      className={clsx(
+        'group relative animate-card-in overflow-hidden rounded-xl bg-gradient-to-b from-surface-elevated to-surface-primary focus-within:ring-2 focus-within:ring-oe-blue/30 motion-safe:transition-all',
+        project.status === 'archived'
+          ? 'cursor-default opacity-90'
+          : 'cursor-pointer hover:shadow-xl hover:border-oe-blue/40',
+      )}
       style={style}
-      onClick={() => navigate(`/projects/${project.id}`)}
+      onClick={() => {
+        if (project.status !== 'archived') navigate(`/projects/${project.id}`);
+      }}
     >
       {mapEnabled && (
         <div className="relative" onClick={(e) => e.stopPropagation()}>
@@ -1269,24 +1281,28 @@ function ProjectCard({
             className="absolute top-14 right-4 z-20 w-44 rounded-lg border border-border bg-surface-elevated shadow-lg overflow-hidden"
             onClick={(e) => e.stopPropagation()}
           >
-            <button
-              onClick={() => {
-                navigate(`/projects/${project.id}`);
-                setMenuOpen(false);
-              }}
-              className="flex w-full items-center gap-2 px-3 py-2 text-sm text-content-primary hover:bg-surface-secondary transition-colors"
-            >
-              <ExternalLink size={14} /> {t('common.open', 'Open')}
-            </button>
-            <button
-              onClick={() => {
-                duplicateMutation.mutate();
-                setMenuOpen(false);
-              }}
-              className="flex w-full items-center gap-2 px-3 py-2 text-sm text-content-primary hover:bg-surface-secondary transition-colors"
-            >
-              <Copy size={14} /> {t('common.duplicate', 'Duplicate')}
-            </button>
+            {project.status !== 'archived' && (
+              <>
+                <button
+                  onClick={() => {
+                    navigate(`/projects/${project.id}`);
+                    setMenuOpen(false);
+                  }}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-sm text-content-primary hover:bg-surface-secondary transition-colors"
+                >
+                  <ExternalLink size={14} /> {t('common.open', 'Open')}
+                </button>
+                <button
+                  onClick={() => {
+                    duplicateMutation.mutate();
+                    setMenuOpen(false);
+                  }}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-sm text-content-primary hover:bg-surface-secondary transition-colors"
+                >
+                  <Copy size={14} /> {t('common.duplicate', 'Duplicate')}
+                </button>
+              </>
+            )}
             {project.status === 'archived' ? (
               <button
                 onClick={() => {
@@ -1334,10 +1350,15 @@ function ProjectCard({
                 <Trash2 size={18} className="text-semantic-error" />
               </div>
               <p className="text-sm font-semibold text-content-primary mb-1">
-                {t('projects.confirm_delete', 'Delete this project?')}
+                {t('projects.confirm_delete_permanent_title', {
+                  defaultValue: 'Delete this project permanently?',
+                })}
               </p>
-              <p className="text-xs text-content-tertiary mb-4 max-w-[200px] mx-auto">
-                {project.name}
+              <p className="text-xs text-content-tertiary mb-4 max-w-[240px] mx-auto">
+                {t('projects.confirm_delete_permanent', {
+                  defaultValue: '{{name}} and its ERP data will be permanently removed. This cannot be undone.',
+                  name: project.name,
+                })}
               </p>
               <div className="flex items-center justify-center gap-2">
                 <Button

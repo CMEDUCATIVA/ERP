@@ -993,98 +993,43 @@ class ProjectService:
         )
         return new_project
 
-    # ── Delete (soft) ─────────────────────────────────────────────────────
+    # ── Delete permanently ────────────────────────────────────────────────
 
     async def delete_project(self, project_id: uuid.UUID) -> None:
-        """Soft-delete a project by setting status to 'archived'.
+        """Permanently delete an active or archived project.
 
-        Also hard-deletes child records (tasks, RFIs, etc.) that reference
-        the project so they don't remain accessible after the project is
-        archived.  The DB FK constraints use ``ondelete=CASCADE`` for real
-        deletes, but since the project row itself is kept (soft-delete) those
-        cascades never trigger - we do it explicitly here.
-
-        Raises 404 if not found. Idempotent - re-archiving an archived
-        project is a no-op (returns 204) so the user gets a clean delete UX.
+        Archiving is a separate status change and must retain all project
+        data. This method is the irreversible path: it removes every
+        project-scoped row, the CMPROYECTOSBIM mapping, and the project row.
         """
         from sqlalchemy import delete as sa_delete
 
         project = await self.get_project(project_id, include_archived=True)
-        if project.status == "archived":
-            return  # Already archived - silently succeed
-        # Snapshot fields before update_fields() - that calls session.expire_all(),
-        # after which any attribute access on `project` would trigger lazy IO and
-        # crash with greenlet_spawn / MissingGreenlet under the async session.
         owner_id = str(project.owner_id)
         project_name = project.name
-
-        # Cascade-delete child records that belong to this project.
-        # These models all have project_id FK with ondelete=CASCADE, but
-        # since we only soft-delete the project row the DB cascade never
-        # fires.  Delete them explicitly so they don't remain accessible.
-        child_models: list[type] = []
-        try:
-            from app.modules.tasks.models import Task
-
-            child_models.append(Task)
-        except ImportError:
-            pass
-        try:
-            from app.modules.rfi.models import RFI
-
-            child_models.append(RFI)
-        except ImportError:
-            pass
-        try:
-            from app.modules.meetings.models import Meeting
-
-            child_models.append(Meeting)
-        except ImportError:
-            pass
-        try:
-            from app.modules.punchlist.models import PunchItem
-
-            child_models.append(PunchItem)
-        except ImportError:
-            pass
-        try:
-            from app.modules.inspections.models import QualityInspection
-
-            child_models.append(QualityInspection)
-        except ImportError:
-            pass
-        try:
-            from app.modules.ncr.models import NCR
-
-            child_models.append(NCR)
-        except ImportError:
-            pass
-        try:
-            from app.modules.fieldreports.models import FieldReport
-
-            child_models.append(FieldReport)
-        except ImportError:
-            pass
-        try:
-            from app.modules.risk.models import RiskItem
-
-            child_models.append(RiskItem)
-        except ImportError:
-            pass
-
-        for model in child_models:
-            try:
-                stmt = sa_delete(model).where(model.project_id == project_id)  # type: ignore[attr-defined]
-                await self.session.execute(stmt)
-            except Exception as exc:
-                logger.debug(
-                    "Cascade delete for %s skipped: %s",
-                    model.__tablename__,  # type: ignore[attr-defined]
-                    exc,
-                )
-
         prior_status = project.status
-        await self.repo.update_fields(project_id, status="archived")
+
+        # Sweep tables without a reliable cascading FK before deleting the
+        # parent. Tables with CASCADE are harmlessly pre-empted by the sweep.
+        await purge_project_children_without_cascade(self.session, [project_id])
+
+        # The integration mapping uses erp_project_id rather than project_id,
+        # so it is outside the generic sweep. Delete it explicitly as well as
+        # relying on its ON DELETE CASCADE constraint.
+        try:
+            from app.modules.integrations.models import CmproyectosbimProjectMapping
+
+            await self.session.execute(
+                sa_delete(CmproyectosbimProjectMapping).where(
+                    CmproyectosbimProjectMapping.erp_project_id == project_id
+                )
+            )
+        except ImportError:
+            logger.debug("CMPROYECTOSBIM mapping model unavailable during project delete")
+
+        await self.session.execute(sa_delete(Project).where(Project.id == project_id))
+        await self.session.flush()
+        self.session.expire_all()
 
         await _safe_publish(
             "projects.project.deleted",
@@ -1100,29 +1045,19 @@ class ProjectService:
             action="delete",
             entity_type="project",
             entity_id=str(project_id),
-            details={"name": project_name},
+            details={
+                "name": project_name,
+                "prior_status": prior_status,
+                "permanent": True,
+            },
         )
 
-        # FSM audit row - record the transition in oe_activity_log so the
-        # workflow lifecycle is queryable from a single audit table.
-        try:
-            from app.core.audit_log import log_activity
-
-            await log_activity(
-                self.session,
-                actor_id=owner_id,
-                entity_type="project",
-                entity_id=str(project_id),
-                action="status_changed",
-                from_status=prior_status,
-                to_status="archived",
-                reason="Project soft-deleted via delete_project()",
-                metadata={"name": project_name},
-            )
-        except Exception:
-            logger.debug("FSM audit log skipped for project archive %s", project_id)
-
-        logger.info("Project archived: %s", project_id)
+        logger.info(
+            "Project permanently deleted: %s (name=%s, prior_status=%s)",
+            project_id,
+            project_name,
+            prior_status,
+        )
 
     # ── Demo data purge (hard delete) ────────────────────────────────────
 

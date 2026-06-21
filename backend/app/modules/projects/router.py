@@ -105,6 +105,8 @@ async def _verify_project_owner(
     project_id: uuid.UUID,
     user_id: str,
     payload: dict | None = None,
+    *,
+    include_archived: bool = False,
 ) -> object:
     """‌⁠‍Load a project and verify the current user is the owner.
 
@@ -112,7 +114,7 @@ async def _verify_project_owner(
     Returns the project object on success, raises 403 if not owner.
     Used for write operations (update, delete, add/remove member, etc.).
     """
-    project = await service.get_project(project_id)
+    project = await service.get_project(project_id, include_archived=include_archived)
     # Admin bypass
     if payload and payload.get("role") == "admin":
         return project
@@ -275,15 +277,15 @@ async def update_project(
     return ProjectResponse.model_validate(project)
 
 
-# ── Delete (archive) ─────────────────────────────────────────────────────
+# ── Delete permanently ──────────────────────────────────────────────────
 
 
 @router.delete(
     "/{project_id}/",
     status_code=204,
-    summary="Archive project",
-    description="Soft-delete (archive) a project. The project and its data are retained "
-    "but hidden from default queries. Use POST /{project_id}/restore to un-archive.",
+    summary="Delete project permanently",
+    description="Permanently delete a project and all project-scoped data. "
+    "Use PATCH status=archived when the project must remain restorable.",
 )
 @router.delete(
     "/{project_id}",
@@ -296,24 +298,25 @@ async def delete_project(
     payload: CurrentUserPayload,
     service: ProjectService = Depends(_get_service),
 ) -> None:
-    """Archive a project (soft delete) and cascade-archive child records.
-
-    Verifies ownership. Marks the project and all its child tasks, RFIs,
-    and other linked entities as archived/inactive so they no longer appear
-    in default queries.
-    """
+    """Permanently delete an active or archived project and its mapping."""
     import logging as _log
 
     try:
-        await _verify_project_owner(service, project_id, user_id, payload)
+        await _verify_project_owner(
+            service,
+            project_id,
+            user_id,
+            payload,
+            include_archived=True,
+        )
         await service.delete_project(project_id)
     except HTTPException:
         raise
     except Exception as exc:
-        _log.getLogger(__name__).exception("Failed to archive project %s", project_id)
+        _log.getLogger(__name__).exception("Failed to permanently delete project %s", project_id)
         raise HTTPException(
             status_code=500,
-            detail="Failed to archive project. Check server logs for details.",
+            detail="Failed to permanently delete project. Check server logs for details.",
         ) from exc
 
 
