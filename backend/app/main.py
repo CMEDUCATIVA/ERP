@@ -2387,19 +2387,17 @@ def create_app() -> FastAPI:
             # version, and every ORM read of the table fails with a missing-
             # column error.
             #
-            # Embedded PostgreSQL is the default no-Docker runtime and is not
-            # managed by Alembic, so it needs an auto-heal via
-            # ADD COLUMN IF NOT EXISTS. External PostgreSQL (a user-supplied
-            # DATABASE_URL, where embedded_pg is not running) keeps managing
-            # columns with Alembic and is left alone.
-            from app.core import embedded_pg as _embedded_pg
+            # Heal missing model columns and indexes before the ORM starts
+            # serving requests. This is required for both embedded and external
+            # PostgreSQL: older deployments may have been Alembic-stamped after
+            # create_all, which records a new head without adding columns that
+            # were introduced later. The migrator only emits idempotent
+            # ADD COLUMN/CREATE INDEX IF NOT EXISTS statements.
+            from app.core.postgres_migrator import postgres_auto_migrate
 
-            if _embedded_pg.is_running():
-                from app.core.postgres_migrator import postgres_auto_migrate
-
-                migrated = await postgres_auto_migrate(engine, Base)
-                if migrated:
-                    logger.info("PostgreSQL auto-migration: %d schema objects (columns + indexes) added", migrated)
+            migrated = await postgres_auto_migrate(engine, Base)
+            if migrated:
+                logger.info("PostgreSQL auto-migration: %d schema objects (columns + indexes) added", migrated)
 
             async with engine.begin() as conn:
                 await conn.run_sync(Base.metadata.create_all)
