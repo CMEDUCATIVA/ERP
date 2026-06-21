@@ -344,6 +344,9 @@ export function CreateProjectModal({
   const { track } = useTelemetry();
   const isEdit = !!editProjectId;
   const isRequiredSsoSetup = !!ssoSetup?.required_setup;
+  const firstEditableStep = 1;
+  const initialSsoStep = isRequiredSsoSetup ? 2 : 1;
+  const lockSsoOriginFields = isRequiredSsoSetup;
 
   // Which create flow we're in. Always starts on the chooser so the
   // user is offered the wizard vs. the old single-window form.
@@ -460,8 +463,8 @@ export function CreateProjectModal({
           ? document.activeElement
           : null;
       setMode(isRequiredSsoSetup ? 'wizard' : 'choose');
-      setStep(isRequiredSsoSetup ? 3 : 1);
-      setMaxStep(isRequiredSsoSetup ? 3 : 1);
+      setStep(initialSsoStep);
+      setMaxStep(initialSsoStep);
       setConfirmingClose(false);
       const suppliedRegion = ssoSetup?.region?.trim() || '';
       const knownRegion = REGION_GROUPS.some((group) =>
@@ -504,7 +507,7 @@ export function CreateProjectModal({
       // `setup_rerun` from the prefill effect instead.
       if (!isEdit) track('wizard_started', { mode: isRequiredSsoSetup ? 'cmproyectosbim_sso' : 'create' });
     }
-  }, [open, isEdit, isRequiredSsoSetup, ssoSetup, track]);
+  }, [open, isEdit, isRequiredSsoSetup, initialSsoStep, ssoSetup, track]);
 
   const { data: existingProjects = [] } = useQuery<Project[]>({
     queryKey: ['projects'],
@@ -908,7 +911,7 @@ export function CreateProjectModal({
   const isLast = step === STEP_COUNT;
 
   const goTo = (s: number) => {
-    const clamped = Math.min(STEP_COUNT, Math.max(1, s));
+    const clamped = Math.min(STEP_COUNT, Math.max(firstEditableStep, s));
     setStep(clamped);
     setMaxStep((m) => Math.max(m, clamped));
   };
@@ -922,7 +925,13 @@ export function CreateProjectModal({
     }
     if (!isLast && canAdvance) goTo(step + 1);
   };
-  const back = () => goTo(step - 1);
+  const back = () => {
+    if (isRequiredSsoSetup && step <= 1) {
+      if (isRequiredSsoSetup) window.location.assign(ssoSetup?.return_url || '/');
+      return;
+    }
+    goTo(step - 1);
+  };
 
   // Enter advances (or creates on the last step); never hijack Enter
   // inside a textarea (newlines) or when a button/select is focused
@@ -1056,7 +1065,7 @@ export function CreateProjectModal({
                     {navigable ? (
                       <button
                         type="button"
-                        onClick={() => setStep(s)}
+                        onClick={() => goTo(s)}
                         aria-label={STEP_TITLES[s - 1]}
                         className={dotCls + ' cursor-pointer hover:opacity-90'}
                       >
@@ -1624,6 +1633,7 @@ export function CreateProjectModal({
                 onChange={(e) => set('name', e.target.value)}
                 placeholder={t('projects.project_name_placeholder', { defaultValue: 'e.g. Office Tower Downtown' })}
                 required aria-required="true"
+                disabled={lockSsoOriginFields}
                 autoFocus
               />
               {duplicateExists && (
@@ -1650,6 +1660,7 @@ export function CreateProjectModal({
                   onChange={(e) => set('description', e.target.value)}
                   placeholder={t('projects.description_placeholder', { defaultValue: 'Project description, scope, notes...' })}
                   rows={3}
+                  disabled={lockSsoOriginFields}
                   className="w-full rounded-lg border border-border px-3 py-2.5 text-sm text-content-primary placeholder:text-content-tertiary bg-surface-primary focus:outline-none focus:ring-2 focus:ring-oe-blue focus:border-transparent transition-all duration-fast ease-oe hover:border-content-tertiary resize-none"
                 />
               </div>
@@ -1668,6 +1679,7 @@ export function CreateProjectModal({
                     groups={REGION_GROUPS}
                     placeholder={t('projects.select_region', { defaultValue: '-- Select region --' })}
                     onChange={(v) => set('region', v)}
+                    disabled={lockSsoOriginFields}
                   />
                   {form.region === '__custom__' && (
                     <CustomValueInput
@@ -1675,6 +1687,7 @@ export function CreateProjectModal({
                       onChange={setCustomRegion}
                       placeholder={t('projects.enter_custom_region', { defaultValue: 'Enter custom region...' })}
                       emptyHint={t('project_wizard.custom_region_required', { defaultValue: 'Type your region to continue.' })}
+                      disabled={lockSsoOriginFields}
                     />
                   )}
                 </div>
@@ -1685,6 +1698,7 @@ export function CreateProjectModal({
                     groups={STANDARD_GROUPS}
                     placeholder={t('projects.select_standard', { defaultValue: '-- Select standard --' })}
                     onChange={(v) => set('classification_standard', v)}
+                    disabled={lockSsoOriginFields}
                   />
                   {form.classification_standard === '__custom__' && (
                     <CustomValueInput
@@ -1692,6 +1706,7 @@ export function CreateProjectModal({
                       onChange={setCustomStandard}
                       placeholder={t('projects.enter_custom_standard', { defaultValue: 'Enter custom standard...' })}
                       emptyHint={t('project_wizard.custom_standard_required', { defaultValue: 'Type the standard name to continue.' })}
+                      disabled={lockSsoOriginFields}
                     />
                   )}
                 </div>
@@ -1704,6 +1719,7 @@ export function CreateProjectModal({
                     groups={CURRENCY_GROUPS}
                     placeholder={t('projects.select_currency', { defaultValue: '-- Select currency --' })}
                     onChange={(v) => set('currency', v)}
+                    disabled={lockSsoOriginFields}
                   />
                   {form.currency === '__custom__' && (
                     <CustomValueInput
@@ -1712,6 +1728,7 @@ export function CreateProjectModal({
                       placeholder={t('projects.enter_custom_currency', { defaultValue: 'e.g. XAF' })}
                       emptyHint={t('project_wizard.custom_currency_required', { defaultValue: 'Type the ISO currency code to continue.' })}
                       maxLength={10}
+                      disabled={lockSsoOriginFields}
                     />
                   )}
                 </div>
@@ -1720,6 +1737,7 @@ export function CreateProjectModal({
                   value={form.locale ?? 'en'}
                   options={LANGUAGES}
                   onChange={(v) => set('locale', v)}
+                  disabled={lockSsoOriginFields}
                 />
               </div>
               <div>
@@ -2018,7 +2036,7 @@ export function CreateProjectModal({
             variant="secondary"
             type="button"
             onClick={
-              isRequiredSsoSetup && step === 1
+              isRequiredSsoSetup && step <= 1
                 ? () => window.location.assign(ssoSetup?.return_url || '/')
                 : mode === 'choose'
                 ? requestClose
@@ -2032,7 +2050,7 @@ export function CreateProjectModal({
             }
             disabled={mutation.isPending}
           >
-            {isRequiredSsoSetup && step === 1
+            {isRequiredSsoSetup && step <= 1
               ? t('integrations.back_to_cmproyectosbim', { defaultValue: 'Back to CMPROYECTOSBIM' })
               : mode === 'choose'
               ? t('common.cancel')
@@ -2187,12 +2205,14 @@ function CustomValueInput({
   placeholder,
   emptyHint,
   maxLength,
+  disabled = false,
 }: {
   value: string;
   onChange: (v: string) => void;
   placeholder: string;
   emptyHint: string;
   maxLength?: number;
+  disabled?: boolean;
 }) {
   const invalid = value.trim().length === 0;
   return (
@@ -2203,8 +2223,9 @@ function CustomValueInput({
         onChange={(e: ChangeEvent<HTMLInputElement>) => onChange(e.target.value)}
         placeholder={placeholder}
         maxLength={maxLength}
+        disabled={disabled}
         aria-invalid={invalid}
-        className={`mt-2 h-10 w-full rounded-lg border bg-surface-primary px-3 text-sm text-content-primary placeholder:text-content-tertiary focus:outline-none focus:ring-2 focus:border-transparent ${
+        className={`mt-2 h-10 w-full rounded-lg border bg-surface-primary px-3 text-sm text-content-primary placeholder:text-content-tertiary focus:outline-none focus:ring-2 focus:border-transparent disabled:cursor-not-allowed disabled:bg-surface-secondary disabled:text-content-tertiary ${
           invalid
             ? 'border-amber-400 focus:ring-amber-400'
             : 'border-border focus:ring-oe-blue'
@@ -2276,7 +2297,7 @@ function SummaryRow({ label, value }: { label: string; value: string }) {
 // ── Grouped Select (with <optgroup>) ──────────────────────────────────────
 
 function GroupedSelectField({
-  label, value, groups, placeholder, onChange, optional, optionalText,
+  label, value, groups, placeholder, onChange, optional, optionalText, disabled = false,
 }: {
   label: string;
   value: string;
@@ -2285,6 +2306,7 @@ function GroupedSelectField({
   onChange: (v: string) => void;
   optional?: boolean;
   optionalText?: string;
+  disabled?: boolean;
 }) {
   const { t } = useTranslation();
   return (
@@ -2300,7 +2322,8 @@ function GroupedSelectField({
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="h-10 w-full rounded-lg border border-border bg-surface-primary px-3 text-sm text-content-primary transition-all duration-fast ease-oe focus:outline-none focus:ring-2 focus:ring-oe-blue focus:border-transparent hover:border-content-tertiary cursor-pointer appearance-none"
+        disabled={disabled}
+        className="h-10 w-full rounded-lg border border-border bg-surface-primary px-3 text-sm text-content-primary transition-all duration-fast ease-oe focus:outline-none focus:ring-2 focus:ring-oe-blue focus:border-transparent hover:border-content-tertiary cursor-pointer appearance-none disabled:cursor-not-allowed disabled:bg-surface-secondary disabled:text-content-tertiary disabled:hover:border-border"
       >
         {placeholder && (
           <option value="" disabled>
@@ -2324,7 +2347,7 @@ function GroupedSelectField({
 // ── Flat Select (for language etc.) ───────────────────────────────────────
 
 function SelectField({
-  label, value, options, onChange, optional, optionalText,
+  label, value, options, onChange, optional, optionalText, disabled = false,
 }: {
   label: string;
   value: string;
@@ -2332,6 +2355,7 @@ function SelectField({
   onChange: (v: string) => void;
   optional?: boolean;
   optionalText?: string;
+  disabled?: boolean;
 }) {
   return (
     <div className="flex flex-col gap-1.5">
@@ -2346,7 +2370,8 @@ function SelectField({
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="h-10 w-full rounded-lg border border-border bg-surface-primary px-3 text-sm text-content-primary transition-all duration-fast ease-oe focus:outline-none focus:ring-2 focus:ring-oe-blue focus:border-transparent hover:border-content-tertiary cursor-pointer appearance-none"
+        disabled={disabled}
+        className="h-10 w-full rounded-lg border border-border bg-surface-primary px-3 text-sm text-content-primary transition-all duration-fast ease-oe focus:outline-none focus:ring-2 focus:ring-oe-blue focus:border-transparent hover:border-content-tertiary cursor-pointer appearance-none disabled:cursor-not-allowed disabled:bg-surface-secondary disabled:text-content-tertiary disabled:hover:border-border"
       >
         {options.map((o) => (
           <option key={o.value} value={o.value}>

@@ -37,6 +37,10 @@ case "${DATABASE_URL:-}" in
     ;;
 esac
 
+echo "Running database migrations..." >&2
+cd /app/backend
+python -m alembic -c alembic.ini upgrade head
+
 exec python -m uvicorn app.main:create_app \
   --factory --host 0.0.0.0 --port 8080 \
   --app-dir /app/backend

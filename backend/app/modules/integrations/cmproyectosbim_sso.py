@@ -331,6 +331,35 @@ def _decode_setup_token(token: str, settings: Settings, user_id: str) -> dict[st
     return payload
 
 
+def _locked_project_from_origin(origin: dict[str, Any], submitted: ProjectCreate) -> ProjectCreate:
+    """Return project data with CMPROYECTOSBIM-owned fields restored.
+
+    The setup wizard exposes step 2 for review during SSO project creation,
+    but browser payloads are still client-controlled. Keep the source-of-truth
+    fields bound to the signed setup token so a user cannot accidentally or
+    maliciously link the wrong CMPROYECTOSBIM project identity to an ERP row.
+    The regional factor is the one step-2 value the user may adjust because it
+    belongs to ERP costing, not to the external project identity.
+    """
+    try:
+        regional_factor = float(submitted.regional_factor or origin.get("regional_factor") or 1.0)
+    except (TypeError, ValueError):
+        regional_factor = 1.0
+    regional_factor = min(2.0, max(0.5, regional_factor))
+
+    return submitted.model_copy(
+        update={
+            "name": str(origin.get("project_name") or submitted.name).strip(),
+            "description": str(origin.get("project_description") or ""),
+            "region": str(origin.get("region") or ""),
+            "currency": str(origin.get("currency") or ""),
+            "locale": str(origin.get("locale") or "en"),
+            "classification_standard": str(origin.get("classification_standard") or ""),
+            "regional_factor": regional_factor,
+        }
+    )
+
+
 def _html_login_bridge(*, access_token: str, refresh_token: str, email: str, redirect_path: str) -> HTMLResponse:
     payload = {
         "accessToken": access_token,
@@ -502,8 +531,9 @@ async def cmproyectosbim_setup_complete(
             )
             return ProjectResponse.model_validate(existing)
 
+    project_data = _locked_project_from_origin(origin, body.project)
     project_service = ProjectService(session, settings)
-    project = await project_service.create_project(body.project, user.id)
+    project = await project_service.create_project(project_data, user.id)
     metadata = dict(project.metadata_ or {})
     metadata["cmproyectosbim"] = {
         "provider": PROVIDER,

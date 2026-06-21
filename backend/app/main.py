@@ -1413,6 +1413,7 @@ def create_app() -> FastAPI:
             _ini = _Path(__file__).resolve().parent.parent / "alembic.ini"
             if _ini.is_file():
                 _cfg = _AlembicConfig(str(_ini))
+                _cfg.set_main_option("script_location", str(_ini.parent / "alembic"))
                 _script = _ScriptDir.from_config(_cfg)
                 _expected = _script.get_current_head()
 
@@ -2428,7 +2429,9 @@ def create_app() -> FastAPI:
                 ini = _StampPath(__file__).resolve().parent.parent / "alembic.ini"
                 if not ini.is_file():
                     return None
-                script = _StampScriptDir.from_config(_StampConfig(str(ini)))
+                cfg = _StampConfig(str(ini))
+                cfg.set_main_option("script_location", str(ini.parent / "alembic"))
+                script = _StampScriptDir.from_config(cfg)
                 mig_ctx.stamp(script, "heads")
                 return script.get_current_head()
 
