@@ -1222,7 +1222,7 @@ function ProjectCard({
               never ship a deeplink to an unanchored project. Sits over
               the map (top-right) with a glass pill so the underlying
               tiles remain visible. */}
-          {cardCoords && (
+          {cardCoords && project.status !== 'archived' && (
             <Link
               to={`/projects/${project.id}/geo`}
               onClick={(e) => e.stopPropagation()}
@@ -1409,7 +1409,7 @@ function ProjectCard({
           {/* Inline fallback: when the map widget is OFF we still want a
               discoverable jump-to-Geo affordance on geo-anchored projects.
               Hidden when the overlay version is already shown above. */}
-          {!mapEnabled && cardCoords && (
+          {!mapEnabled && cardCoords && project.status !== 'archived' && (
             <Link
               to={`/projects/${project.id}/geo`}
               onClick={(e) => e.stopPropagation()}

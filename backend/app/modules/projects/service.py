@@ -3,7 +3,8 @@
 Stateless service layer. Handles:
 - Project CRUD with ownership enforcement
 - Project code auto-generation (PRJ-{YEAR}-{SEQ:04d})
-- Soft-delete via status='archived'
+- Non-destructive archiving via status='archived'
+- Permanent deletion through the explicit delete operation
 - Event publishing on create/update/delete
 """
 

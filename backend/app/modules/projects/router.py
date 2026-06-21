@@ -5,7 +5,7 @@ Endpoints:
     GET  /                   - List my projects (auth required)
     GET  /{project_id}       - Get project (auth required)
     PATCH /{project_id}      - Update project (auth required)
-    DELETE /{project_id}     - Archive project (auth required)
+    DELETE /{project_id}     - Permanently delete project (auth required)
 """
 
 import logging
