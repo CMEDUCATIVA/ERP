@@ -57,6 +57,10 @@ const REGION_GROUPS: OptionGroup[] = [
       { value: 'Canada', label: 'Canada' },
       { value: 'Brazil', label: 'Brazil' },
       { value: 'Mexico', label: 'Mexico' },
+      { value: 'PE', label: 'Perú' },
+      { value: 'CL', label: 'Chile' },
+      { value: 'CO', label: 'Colombia' },
+      { value: 'BO', label: 'Bolivia' },
       { value: 'LatinAmerica', label: 'Latin America (Other)' },
     ],
   },
@@ -109,6 +113,10 @@ const REGION_TO_PACK: Record<string, string> = {
   Russia: 'russia_cis',
   Brazil: 'latam',
   Mexico: 'latam',
+  PE: 'latam',
+  CL: 'latam',
+  CO: 'latam',
+  BO: 'latam',
   LatinAmerica: 'latam',
   MiddleEast: 'mena',
   GulfStates: 'mena',
@@ -126,20 +134,32 @@ const REGION_TO_PACK: Record<string, string> = {
 
 const STANDARD_GROUPS: OptionGroup[] = [
   {
-    group: 'Common Standards',
+    group: 'Latinoamérica',
     options: [
-      { value: 'din276', label: 'DIN 276 (Germany / DACH)' },
-      { value: 'nrm', label: 'NRM 1/2 (United Kingdom)' },
-      { value: 'masterformat', label: 'MasterFormat (US / Canada)' },
-      { value: 'uniformat', label: 'UniFormat (US)' },
-      { value: 'uniclass', label: 'Uniclass (UK)' },
-      { value: 'omniclass', label: 'OmniClass (International)' },
-      { value: 'gbt', label: 'GB/T (China)' },
+      { value: 'peru_metrados', label: 'Perú - Norma Técnica de Metrados' },
+      { value: 'sinapi', label: 'Brasil - SINAPI' },
+      { value: 'nbr', label: 'Brasil - NBR 12721' },
+      { value: 'chile_costos', label: 'Chile - Clasificación de costos nacional' },
+      { value: 'colombia_costos', label: 'Colombia - Clasificación de costos nacional' },
+      { value: 'mexico_costos', label: 'México - Clasificación de costos nacional' },
+      { value: 'bolivia_costos', label: 'Bolivia - Clasificación de costos nacional' },
     ],
   },
   {
-    group: 'Other',
-    options: [{ value: '__custom__', label: 'Custom...' }],
+    group: 'Estándares internacionales',
+    options: [
+      { value: 'din276', label: 'DIN 276 - Alemania / DACH' },
+      { value: 'nrm', label: 'NRM 1/2 - Reino Unido' },
+      { value: 'masterformat', label: 'MasterFormat - EE. UU. / Canadá' },
+      { value: 'uniformat', label: 'UniFormat - EE. UU.' },
+      { value: 'uniclass', label: 'Uniclass 2015 - Reino Unido' },
+      { value: 'omniclass', label: 'OmniClass - Internacional' },
+      { value: 'gbt50500', label: 'GB/T 50500 - China' },
+    ],
+  },
+  {
+    group: 'Personalizado',
+    options: [{ value: '__custom__', label: 'Personalizado...' }],
   },
 ];
 
@@ -177,6 +197,7 @@ export const CURRENCY_GROUPS: OptionGroup[] = [
       { value: 'CLP', label: 'CLP (CL$) - Chilean Peso' },
       { value: 'PEN', label: 'PEN (S/) - Peruvian Sol' },
       { value: 'COP', label: 'COP (COL$) - Colombian Peso' },
+      { value: 'BOB', label: 'BOB (Bs.) - Bolivian Boliviano' },
     ],
   },
   {

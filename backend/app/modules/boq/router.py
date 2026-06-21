@@ -2750,15 +2750,13 @@ def _build_rule_sets(
         "JP": ["sekisan"],
         "UAE": ["nrm"],
         "GCC": ["nrm"],
-        # Epic I8: Spain + Hispanophone LATAM - BC3 first, MasterFormat
-        # second (LATAM exporters increasingly carry both classification
-        # schemes; BC3 is the source-of-truth for the tender format).
+        # Spain and markets that explicitly use the existing BC3 /
+        # MasterFormat compatibility profile. Peru, Chile and Colombia now
+        # expose their own classification choices in project setup, so region
+        # alone must not silently apply a foreign cost standard.
         "ES": ["bc3", "masterformat"],
         "MX": ["bc3", "masterformat"],
         "AR": ["bc3", "masterformat"],
-        "CL": ["bc3", "masterformat"],
-        "CO": ["bc3", "masterformat"],
-        "PE": ["bc3", "masterformat"],
     }
     for rs in REGION_RULES.get(region.upper(), []):
         if rs not in rule_sets:
