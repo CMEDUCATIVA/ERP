@@ -1254,16 +1254,16 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
     <aside
       data-tour="sidebar"
       data-testid="app-sidebar"
-      className="oe-sidebar relative flex h-full w-sidebar flex-col bg-[#163473] text-white"
+      className="oe-sidebar relative flex h-full w-sidebar flex-col bg-[#05002c] text-white"
       style={{
-        '--oe-bg': '#163473',
-        '--oe-bg-ch': '22 52 115',
-        '--oe-bg-secondary': '#1d4388',
-        '--oe-bg-secondary-ch': '29 67 136',
-        '--oe-bg-tertiary': '#294d91',
-        '--oe-bg-tertiary-ch': '41 77 145',
-        '--oe-bg-elevated': '#214484',
-        '--oe-bg-elevated-ch': '33 68 132',
+        '--oe-bg': '#05002c',
+        '--oe-bg-ch': '5 0 44',
+        '--oe-bg-secondary': '#0d0740',
+        '--oe-bg-secondary-ch': '13 7 64',
+        '--oe-bg-tertiary': '#151050',
+        '--oe-bg-tertiary-ch': '21 16 80',
+        '--oe-bg-elevated': '#100944',
+        '--oe-bg-elevated-ch': '16 9 68',
         '--oe-text-primary': '#ffffff',
         '--oe-text-secondary': '#ffffff',
         '--oe-text-tertiary': '#e3e9f5',

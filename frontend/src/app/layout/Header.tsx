@@ -208,7 +208,7 @@ export function Header({ title, onMenuClick }: HeaderProps) {
       className={clsx(
         'oe-app-header sticky z-30 relative text-white',
         'flex h-header items-center justify-between gap-3 px-4 sm:px-6 lg:px-8',
-        'bg-[#163473] shadow-[0_1px_0_rgba(255,255,255,0.14)]',
+        'bg-[#05002c] shadow-[0_1px_0_rgba(255,255,255,0.14)]',
       )}
       // In the desktop shell the browser-style toolbar (h-9 = 36px) sits above
       // the header, so the header pins just below it instead of under it. In the
