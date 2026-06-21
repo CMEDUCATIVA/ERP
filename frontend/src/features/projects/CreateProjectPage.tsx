@@ -1679,7 +1679,6 @@ export function CreateProjectModal({
                     groups={REGION_GROUPS}
                     placeholder={t('projects.select_region', { defaultValue: '-- Select region --' })}
                     onChange={(v) => set('region', v)}
-                    disabled={lockSsoOriginFields}
                   />
                   {form.region === '__custom__' && (
                     <CustomValueInput
@@ -1687,7 +1686,6 @@ export function CreateProjectModal({
                       onChange={setCustomRegion}
                       placeholder={t('projects.enter_custom_region', { defaultValue: 'Enter custom region...' })}
                       emptyHint={t('project_wizard.custom_region_required', { defaultValue: 'Type your region to continue.' })}
-                      disabled={lockSsoOriginFields}
                     />
                   )}
                 </div>
@@ -1698,7 +1696,6 @@ export function CreateProjectModal({
                     groups={STANDARD_GROUPS}
                     placeholder={t('projects.select_standard', { defaultValue: '-- Select standard --' })}
                     onChange={(v) => set('classification_standard', v)}
-                    disabled={lockSsoOriginFields}
                   />
                   {form.classification_standard === '__custom__' && (
                     <CustomValueInput
@@ -1706,7 +1703,6 @@ export function CreateProjectModal({
                       onChange={setCustomStandard}
                       placeholder={t('projects.enter_custom_standard', { defaultValue: 'Enter custom standard...' })}
                       emptyHint={t('project_wizard.custom_standard_required', { defaultValue: 'Type the standard name to continue.' })}
-                      disabled={lockSsoOriginFields}
                     />
                   )}
                 </div>
@@ -1719,7 +1715,6 @@ export function CreateProjectModal({
                     groups={CURRENCY_GROUPS}
                     placeholder={t('projects.select_currency', { defaultValue: '-- Select currency --' })}
                     onChange={(v) => set('currency', v)}
-                    disabled={lockSsoOriginFields}
                   />
                   {form.currency === '__custom__' && (
                     <CustomValueInput
@@ -1728,7 +1723,6 @@ export function CreateProjectModal({
                       placeholder={t('projects.enter_custom_currency', { defaultValue: 'e.g. XAF' })}
                       emptyHint={t('project_wizard.custom_currency_required', { defaultValue: 'Type the ISO currency code to continue.' })}
                       maxLength={10}
-                      disabled={lockSsoOriginFields}
                     />
                   )}
                 </div>
@@ -1737,7 +1731,6 @@ export function CreateProjectModal({
                   value={form.locale ?? 'en'}
                   options={LANGUAGES}
                   onChange={(v) => set('locale', v)}
-                  disabled={lockSsoOriginFields}
                 />
               </div>
               <div>

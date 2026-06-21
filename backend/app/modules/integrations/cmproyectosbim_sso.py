@@ -307,11 +307,6 @@ def _create_setup_token(
             "project_identifier": str(payload.get("project_identifier") or ""),
             "project_name": str(payload.get("project_name") or ""),
             "project_description": str(payload.get("project_description") or ""),
-            "region": str(payload.get("default_project_region") or ""),
-            "currency": str(payload.get("default_project_currency") or ""),
-            "locale": str(payload.get("user_locale") or "en"),
-            "classification_standard": str(payload.get("default_project_classification_standard") or ""),
-            "regional_factor": payload.get("default_project_regional_factor") or 1.0,
             "membership_role": _project_membership_role(payload),
         },
     }
@@ -334,28 +329,14 @@ def _decode_setup_token(token: str, settings: Settings, user_id: str) -> dict[st
 def _locked_project_from_origin(origin: dict[str, Any], submitted: ProjectCreate) -> ProjectCreate:
     """Return project data with CMPROYECTOSBIM-owned fields restored.
 
-    The setup wizard exposes step 2 for review during SSO project creation,
-    but browser payloads are still client-controlled. Keep the source-of-truth
-    fields bound to the signed setup token so a user cannot accidentally or
-    maliciously link the wrong CMPROYECTOSBIM project identity to an ERP row.
-    The regional factor is the one step-2 value the user may adjust because it
-    belongs to ERP costing, not to the external project identity.
+    Only the project name and description belong to CMPROYECTOSBIM. Region,
+    classification, currency, locale and regional factor are ERP settings and
+    must remain user-controlled during setup.
     """
-    try:
-        regional_factor = float(submitted.regional_factor or origin.get("regional_factor") or 1.0)
-    except (TypeError, ValueError):
-        regional_factor = 1.0
-    regional_factor = min(2.0, max(0.5, regional_factor))
-
     return submitted.model_copy(
         update={
             "name": str(origin.get("project_name") or submitted.name).strip(),
             "description": str(origin.get("project_description") or ""),
-            "region": str(origin.get("region") or ""),
-            "currency": str(origin.get("currency") or ""),
-            "locale": str(origin.get("locale") or "en"),
-            "classification_standard": str(origin.get("classification_standard") or ""),
-            "regional_factor": regional_factor,
         }
     )
 
@@ -487,11 +468,11 @@ async def cmproyectosbim_setup_context(
         setup_token=setup_token,
         project_name=str(origin.get("project_name") or ""),
         project_description=str(origin.get("project_description") or ""),
-        region=str(origin.get("region") or ""),
-        currency=str(origin.get("currency") or ""),
-        locale=str(origin.get("locale") or "en"),
-        classification_standard=str(origin.get("classification_standard") or ""),
-        regional_factor=float(origin.get("regional_factor") or 1.0),
+        region="",
+        currency="",
+        locale="en",
+        classification_standard="",
+        regional_factor=1.0,
         external_project_id=str(origin["external_project_id"]),
         project_identifier=str(origin.get("project_identifier") or ""),
         return_url=str(payload.get("return_url") or "/"),
