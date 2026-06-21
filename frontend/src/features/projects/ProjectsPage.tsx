@@ -113,8 +113,8 @@ export function ProjectsPage() {
   const [page, setPage] = useState(1);
 
   const { data: projects, isLoading } = useQuery({
-    queryKey: ['projects'],
-    queryFn: projectsApi.list,
+    queryKey: ['projects', 'all-statuses'],
+    queryFn: projectsApi.listAll,
     staleTime: 5 * 60_000,
   });
 

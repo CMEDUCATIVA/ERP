@@ -244,6 +244,16 @@ export interface ProjectProfileResult {
 
 export const projectsApi = {
   list: () => apiGet<Project[]>('/v1/projects/'),
+  listByStatus: (status: 'active' | 'archived') =>
+    apiGet<Project[]>(`/v1/projects/?status=${status}`),
+  listAll: async () => {
+    const [visible, archived] = await Promise.all([
+      projectsApi.list(),
+      projectsApi.listByStatus('archived'),
+    ]);
+    const byId = new Map([...visible, ...archived].map((project) => [project.id, project]));
+    return [...byId.values()];
+  },
   get: (id: string) => apiGet<Project>(`/v1/projects/${id}`),
   create: (data: CreateProjectData) => apiPost<Project>('/v1/projects/', data),
   getCmproyectosbimSetup: (setupToken: string) =>

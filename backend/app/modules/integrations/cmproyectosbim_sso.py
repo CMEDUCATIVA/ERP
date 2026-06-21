@@ -403,6 +403,15 @@ async def cmproyectosbim_sso_callback(
             await session.flush()
             mapping = None
         else:
+            if project.status == "archived":
+                project = await ProjectService(session, settings).restore_project(project.id)
+                await session.refresh(mapping)
+                await session.refresh(user)
+                logger.info(
+                    "Restored archived ERP project %s for CMPROYECTOSBIM project %s",
+                    project.id,
+                    external_project_id,
+                )
             await _ensure_project_membership(
                 session,
                 project=project,
@@ -504,6 +513,15 @@ async def cmproyectosbim_setup_complete(
             await session.delete(mapping)
             await session.flush()
         else:
+            if existing.status == "archived":
+                existing = await ProjectService(session, settings).restore_project(existing.id)
+                await session.refresh(mapping)
+                await session.refresh(user)
+                logger.info(
+                    "Restored archived ERP project %s while completing CMPROYECTOSBIM setup %s",
+                    existing.id,
+                    external_project_id,
+                )
             await _ensure_project_membership(
                 session,
                 project=existing,
