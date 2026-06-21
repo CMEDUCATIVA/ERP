@@ -206,9 +206,9 @@ export function Header({ title, onMenuClick }: HeaderProps) {
   return (
     <header
       className={clsx(
-        'sticky z-30 relative',
+        'oe-app-header sticky z-30 relative text-white',
         'flex h-header items-center justify-between gap-3 px-4 sm:px-6 lg:px-8',
-        'bg-surface-primary/80 backdrop-blur-xl',
+        'bg-[#163473] shadow-[0_1px_0_rgba(255,255,255,0.14)]',
       )}
       // In the desktop shell the browser-style toolbar (h-9 = 36px) sits above
       // the header, so the header pins just below it instead of under it. In the
@@ -217,7 +217,7 @@ export function Header({ title, onMenuClick }: HeaderProps) {
     >
       {/* Soft hairline at the bottom — replaces a hard 1px border for
           a calmer modern-SaaS-style separation from the page below. */}
-      <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-border to-transparent" />
+      <div className="absolute bottom-0 left-0 right-0 h-px bg-white/15" />
 
       {/* ── Zone 1 (Workspace): mobile menu + project breadcrumb + title ── */}
       <div className="flex items-center gap-3 min-w-0 shrink">
@@ -225,7 +225,7 @@ export function Header({ title, onMenuClick }: HeaderProps) {
           <button
             onClick={onMenuClick}
             aria-label={t('common.open_menu', { defaultValue: 'Open menu' })}
-            className="flex h-9 w-9 items-center justify-center rounded-lg text-content-secondary hover:bg-surface-secondary lg:hidden"
+            className="flex h-9 w-9 items-center justify-center rounded-lg text-white/85 hover:bg-white/10 hover:text-white lg:hidden"
           >
             <Menu size={20} />
           </button>
@@ -243,13 +243,13 @@ export function Header({ title, onMenuClick }: HeaderProps) {
             <ChevronRight
               size={14}
               strokeWidth={1.75}
-              className="hidden lg:block shrink-0 text-content-quaternary/60"
+              className="hidden lg:block shrink-0 text-white/50"
               aria-hidden
             />
             {/* text-base until xl: at lg widths the right cluster + project
                 pill left too little room and module names truncated to
                 "Estima..." (uniformity sweep S5 follow-up). */}
-            <h1 className="hidden lg:flex items-center gap-2 min-w-0 text-base font-semibold text-content-primary xl:text-lg">
+            <h1 className="hidden lg:flex items-center gap-2 min-w-0 text-base font-semibold text-white xl:text-lg">
               {/* Module icon — mirrors the active route's sidebar icon so the
                   top title is visually tied to the module. Decorative
                   (aria-hidden); absent (no layout shift) when the route has
@@ -258,7 +258,7 @@ export function Header({ title, onMenuClick }: HeaderProps) {
                 <RouteIcon
                   size={18}
                   strokeWidth={1.75}
-                  className="shrink-0 text-content-secondary"
+                  className="shrink-0 text-white/80"
                   aria-hidden
                 />
               )}
@@ -305,13 +305,13 @@ export function Header({ title, onMenuClick }: HeaderProps) {
           centred across the header but that created awkward visual
           tension with the project switcher on the left; planted next
           to Support/Help, the two CTAs read as a coherent cluster. */}
-      <div className="flex items-center gap-2 shrink-0">
+      <div className="oe-header-actions flex items-center gap-2 shrink-0">
         {/* ── Journey (orientation) ─────────────────────────────────
             Names the lifecycle phase the current screen belongs to and
             opens the whole-platform journey map. First in the cluster so it
             reads as "where am I" ahead of the action buttons. */}
         <ProjectJourneyButton />
-        <div className="hidden sm:block h-4 w-px bg-border-light/70" aria-hidden />
+        <div className="hidden sm:block h-4 w-px bg-white/20" aria-hidden />
 
         {/* ── Zone 2 (Search) ──────────────────────────────────────── */}
         <button
@@ -323,10 +323,10 @@ export function Header({ title, onMenuClick }: HeaderProps) {
             // the translucent header background; falls back to a dark tint
             // in dark mode so the chip stays readable on the dark blurred
             // topbar.
-            'border border-border-light bg-white/85 backdrop-blur-sm dark:bg-surface-primary/70',
-            'text-sm text-content-tertiary shadow-sm',
+            'border border-white/25 bg-white/10 backdrop-blur-sm',
+            'text-sm text-white/85 shadow-sm',
             'transition-colors duration-fast ease-oe',
-            'hover:border-content-quaternary/40 hover:bg-white dark:hover:bg-surface-primary hover:text-content-secondary',
+            'hover:border-white/45 hover:bg-white/15 hover:text-white',
             // w-56 only at xl: at lg the wide search box squeezed the left
             // workspace zone and truncated the module title.
             'w-40 md:w-44 xl:w-56',
@@ -334,7 +334,7 @@ export function Header({ title, onMenuClick }: HeaderProps) {
         >
           <Search size={14} strokeWidth={1.75} className="shrink-0" />
           <span className="truncate">{t('common.search')}</span>
-          <kbd className="ml-auto inline-flex items-center gap-0.5 rounded border border-border-light bg-surface-primary px-1 py-px text-[9px] font-medium text-content-quaternary">
+          <kbd className="ml-auto inline-flex items-center gap-0.5 rounded border border-white/20 bg-white/10 px-1 py-px text-[9px] font-medium text-white/70">
             ⌘K
           </kbd>
         </button>
@@ -345,14 +345,14 @@ export function Header({ title, onMenuClick }: HeaderProps) {
           aria-label={t('common.search', { defaultValue: 'Search' })}
           className={clsx(
             'flex sm:hidden',
-            'h-8 w-8 items-center justify-center rounded-lg text-content-secondary hover:bg-surface-secondary transition-colors',
+            'h-8 w-8 items-center justify-center rounded-lg text-white/85 hover:bg-white/10 hover:text-white transition-colors',
           )}
         >
           <Search size={16} />
         </button>
 
         {/* Hairline divider between Zone 2 and Zone 3. */}
-        <div className="hidden sm:block h-4 w-px bg-border-light/70" aria-hidden />
+        <div className="hidden sm:block h-4 w-px bg-white/20" aria-hidden />
 
         {/* ── Zone 3 (Notifications + Subscribe + Bug + Help) ──────
             Order: NotificationBell · What's new · SupportUs · Subscribe · BugReport · Help.
@@ -367,7 +367,7 @@ export function Header({ title, onMenuClick }: HeaderProps) {
         <HelpMenu />
 
         {/* Hairline divider between Zone 3 and Zone 4. */}
-        <div className="hidden sm:block h-4 w-px bg-border-light/70" aria-hidden />
+        <div className="hidden sm:block h-4 w-px bg-white/20" aria-hidden />
 
         {/* ── Zone 4 (Account) ─────────────────────────────────────── */}
         <UploadQueueIndicator />
@@ -400,7 +400,7 @@ function ModuleInfoReopener() {
       aria-label={label}
       title={label}
       data-testid="header-module-info"
-      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-content-tertiary transition-colors hover:bg-surface-secondary hover:text-content-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
+      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-white/75 transition-colors hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
     >
       <Info size={15} strokeWidth={1.75} />
     </button>

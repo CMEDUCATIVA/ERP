@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useMemo, useRef, Fragment } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef, Fragment, type CSSProperties } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { CustomBranding } from './CustomBranding';
@@ -1254,14 +1254,36 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
     <aside
       data-tour="sidebar"
       data-testid="app-sidebar"
-      className="oe-sidebar relative flex h-full w-sidebar flex-col bg-surface-primary"
+      className="oe-sidebar relative flex h-full w-sidebar flex-col bg-[#163473] text-white"
       style={{
+        '--oe-bg': '#163473',
+        '--oe-bg-ch': '22 52 115',
+        '--oe-bg-secondary': '#1d4388',
+        '--oe-bg-secondary-ch': '29 67 136',
+        '--oe-bg-tertiary': '#294d91',
+        '--oe-bg-tertiary-ch': '41 77 145',
+        '--oe-bg-elevated': '#214484',
+        '--oe-bg-elevated-ch': '33 68 132',
+        '--oe-text-primary': '#ffffff',
+        '--oe-text-secondary': '#ffffff',
+        '--oe-text-tertiary': '#e3e9f5',
+        '--oe-text-quaternary': '#c7d2e8',
+        '--oe-border': 'rgba(255, 255, 255, 0.24)',
+        '--oe-border-light': 'rgba(255, 255, 255, 0.15)',
+        '--oe-border-focus': '#ffffff',
+        '--oe-blue': '#ffffff',
+        '--oe-blue-ch': '255 255 255',
+        '--oe-blue-hover': '#f3f6fc',
+        '--oe-blue-active': '#e3e9f5',
+        '--oe-blue-dark': '#ffffff',
+        '--oe-blue-text': '#ffffff',
+        '--oe-blue-subtle': 'rgba(255, 255, 255, 0.14)',
         // Right-edge depth — 1px hairline + a soft 12px fade. Replaces
         // the hard `border-r border-border-light` for a modern-SaaS
         // feel: definition without rigidity.
         boxShadow:
-          '1px 0 0 rgba(15, 23, 42, 0.05), 4px 0 12px -8px rgba(15, 23, 42, 0.06)',
-      }}
+          '1px 0 0 rgba(8, 24, 58, 0.55), 6px 0 18px -10px rgba(8, 24, 58, 0.65)',
+      } as CSSProperties}
     >
       {/* Page-scoped CSS — sidebar-only animations. Defined inline to
           keep this component fully self-contained. */}
