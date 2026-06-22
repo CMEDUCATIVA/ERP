@@ -75,28 +75,13 @@ export function Logo({ size = 'md', animate = false, className }: LogoProps) {
         {/* Background */}
         <rect x="32" y="32" width="448" height="448" rx="96" fill={`url(#${gradientId})`} style={bgStyle} />
 
-        {/* Bar 1 (short) */}
-        <rect x="102" y="296" width="42" height="114" rx="6" fill="#fff" opacity=".85" style={barStyle(120, 114)} />
-        {/* Bar 2 (medium) */}
-        <rect x="162" y="233" width="42" height="177" rx="6" fill="#fff" opacity=".95" style={barStyle(200, 177)} />
-        {/* Bar 3 (tall) */}
-        <rect x="222" y="176" width="42" height="234" rx="6" fill="#fff" opacity=".85" style={barStyle(280, 234)} />
-
-        {/* Building body */}
-        <rect x="282" y="150" width="128" height="260" rx="8" fill="#fff" opacity=".9" style={buildingStyle} />
-
-        {/* Windows + door — only shown at medium+ sizes */}
-        {!isSmall && (
-          <g style={buildingStyle}>
-            <rect x="304" y="182" width="26" height="28" rx="4" fill={`url(#${gradientId})`} opacity=".5" style={windowStyle(550)} />
-            <rect x="362" y="182" width="26" height="28" rx="4" fill={`url(#${gradientId})`} opacity=".5" style={windowStyle(600)} />
-            <rect x="304" y="226" width="26" height="28" rx="4" fill={`url(#${gradientId})`} opacity=".5" style={windowStyle(650)} />
-            <rect x="362" y="226" width="26" height="28" rx="4" fill={`url(#${gradientId})`} opacity=".5" style={windowStyle(700)} />
-            <rect x="304" y="272" width="26" height="28" rx="4" fill={`url(#${gradientId})`} opacity=".45" style={windowStyle(750)} />
-            <rect x="362" y="272" width="26" height="28" rx="4" fill={`url(#${gradientId})`} opacity=".45" style={windowStyle(800)} />
-            <rect x="329" y="328" width="34" height="82" rx="4" fill={`url(#${gradientId})`} opacity=".55" style={windowStyle(850)} />
-          </g>
-        )}
+        {/* HardHat icon — scaled to fit */}
+        <g transform="translate(256,256) scale(18) translate(-12,-12)" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M10 10V5a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v5" />
+          <path d="M14 6a6 6 0 0 1 6 6v3" />
+          <path d="M4 15v-3a6 6 0 0 1 6-6" />
+          <rect x="2" y="15" width="20" height="4" rx="1" />
+        </g>
       </svg>
     </div>
   );

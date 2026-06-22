@@ -1,29 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" viewBox="0 0 512 512" fill="none">
-  <metadata>
-    <rdf:RDF>
-      <rdf:Description rdf:about="">
-        <dc:title>OpenConstructionERP</dc:title>
-        <dc:creator>Artem Boiko · Data Driven Construction</dc:creator>
-        <dc:source>https://datadrivenconstruction.io</dc:source>
-        <dc:identifier>urn:ddc:oce:cwicr:2026</dc:identifier>
-        <dc:rights>AGPL-3.0-or-later · DDC-CWICR-OE-2026</dc:rights>
-      </rdf:Description>
-    </rdf:RDF>
-  </metadata>
-  <defs>
-    <linearGradient id="lg" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#0066ff"/>
-      <stop offset="100%" stop-color="#5856d6"/>
-    </linearGradient>
-  </defs>
-  <!-- Background -->
-  <rect x="32" y="32" width="448" height="448" rx="96" fill="url(#lg)"/>
-  <!-- Bar 1 (short) -->
-  <rect x="102" y="296" width="42" height="114" rx="6" fill="#fff" opacity=".85"/>
-  <!-- Bar 2 (medium) -->
-  <rect x="162" y="233" width="42" height="177" rx="6" fill="#fff" opacity=".95"/>
-  <!-- Bar 3 (tall) -->
-  <rect x="222" y="176" width="42" height="234" rx="6" fill="#fff" opacity=".85"/>
-  <!-- Building body -->
-  <rect x="282" y="150" width="128" height="260" rx="8" fill="#fff" opacity=".9"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <rect x="0" y="0" width="512" height="512" rx="96" fill="#0071e3"/>
+  <g transform="translate(256,256) scale(14) translate(-12,-12)" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M10 10V5a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v5"/>
+    <path d="M14 6a6 6 0 0 1 6 6v3"/>
+    <path d="M4 15v-3a6 6 0 0 1 6-6"/>
+    <rect x="2" y="15" width="20" height="4" rx="1"/>
+  </g>
 </svg>

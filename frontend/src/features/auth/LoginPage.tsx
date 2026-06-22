@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, Link, useLocation } from 'react-router-dom';
 import {
-  Eye, EyeOff, Mail, Lock, Globe, ChevronDown, X, Github, Users, ArrowUpRight, Pencil,
+  Eye, EyeOff, Mail, Lock, Globe, ChevronDown, X, Github, Users, ArrowUpRight,
   ShieldCheck, Zap, Brain,
   FileSpreadsheet, CalendarClock, TrendingUp, Boxes, Database,
   BarChart3, Upload, FileCheck,
@@ -612,15 +612,8 @@ export function LoginPage() {
           <div className="absolute -top-24 -left-24 w-[420px] h-[420px] rounded-full bg-sky-100/55 dark:bg-sky-500/12 blur-[110px]" />
         </div>
         <div className="w-full max-w-[380px] relative z-10">
-          {/* Logo - tenant white-label (logo / company name) when set via
-              the in-app sidebar editor; otherwise the default brand. The
-              small "by OpenConstructionERP" attribution stays visible in
-              customised modes (AGPL-3.0 requirement). */}
-          <div className="relative mb-5 flex flex-col items-center animate-stagger-in" style={{ animationDelay: '0ms' }}>
-            {/* Brand + edit-pencil row - grouped together and visually
-                centered in the form column (previously the pencil was
-                pinned to the far right edge which made the brand block
-                look off-centre relative to the form below). */}
+          {/* Logo - tenant white-label when set via sidebar; default otherwise. */}
+          <div className="relative mb-5 flex flex-col items-center animate-stagger-in bg-[#0071e3] rounded-xl px-6 py-5" style={{ animationDelay: '0ms' }}>
             <div className="flex items-center gap-2">
               {brandCustomised ? (
                 <div className="flex flex-col items-center">
@@ -633,20 +626,19 @@ export function LoginPage() {
                     />
                   ) : (
                     <span
-                      className="block max-w-full truncate text-center text-3xl font-extrabold text-content-primary leading-none"
+                      className="block max-w-full truncate text-center text-3xl font-extrabold text-white leading-none"
                       style={{ fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif", letterSpacing: '-0.02em' }}
                       title={brandName}
                     >
                       {brandName}
                     </span>
                   )}
-                  {/* "by CMPROYECTOSBIM" - subordinate attribution */}
                   <span
-                    className="mt-2 block text-[11px] leading-none text-content-tertiary"
+                    className="mt-2 block text-[11px] leading-none text-white/70"
                     style={{ fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif", letterSpacing: '0.02em' }}
                   >
                     by{' '}
-                    <span className="font-semibold tracking-tight">
+                    <span className="font-semibold tracking-tight text-white">
                       CMPROYECTOSBIM
                     </span>
                   </span>
@@ -655,27 +647,15 @@ export function LoginPage() {
                 <div className="flex items-center gap-2.5">
                   <Logo size="md" animate />
                   <span
-                    className="text-2xl font-extrabold text-content-primary whitespace-nowrap"
+                    className="text-2xl font-extrabold text-white whitespace-nowrap"
                     style={{ fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif", letterSpacing: '-0.02em' }}
                   >
                     CMPROYECTOSBIM
                   </span>
                 </div>
               )}
-              {/* White-label trigger - same editor as the in-app sidebar
-                  brand control, available pre-auth so a tenant can put
-                  their own logo on the sign-in screen. */}
-              <button
-                type="button"
-                onClick={() => setBrandOpen(true)}
-                className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-border-light bg-surface-elevated/60 text-content-tertiary backdrop-blur-sm transition-colors hover:border-oe-blue/40 hover:bg-oe-blue/5 hover:text-oe-blue focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oe-blue/40"
-                aria-label={t('login.brand_edit', { defaultValue: 'Customize logo' })}
-                title={t('login.brand_edit', { defaultValue: 'Customize logo' })}
-              >
-                <Pencil size={13} strokeWidth={2.25} />
-              </button>
             </div>
-            <p className="mt-2 text-sm text-content-tertiary">
+            <p className="mt-2 text-sm text-white/80">
               {t('login.workspace_tagline', { defaultValue: 'Professional construction project workspace' })}
             </p>
           </div>
