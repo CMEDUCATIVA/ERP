@@ -106,6 +106,9 @@ const FLAGS: Record<string, string> = {
   // ID — Indonesia (red top, white bottom)
   id: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 3 2"><rect width="3" height="1" fill="#FF0000"/><rect y="1" width="3" height="1" fill="#fff"/></svg>`,
 
+  // PE — Peru (red-white-red vertical)
+  pe: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 7 4"><rect width="2.33" height="4" fill="#D91023"/><rect x="2.33" width="2.34" height="4" fill="#fff"/><rect x="4.67" width="2.33" height="4" fill="#D91023"/></svg>`,
+
   // MX — Mexico (green-white-red vertical)
   mx: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 7 4"><rect width="7" height="4" fill="#fff"/><rect width="2.33" height="4" fill="#006847"/><rect x="4.67" width="2.33" height="4" fill="#CE1126"/><circle cx="3.5" cy="2" r=".5" fill="none" stroke="#7B3F00" stroke-width=".15"/><circle cx="3.5" cy="2" r=".15" fill="#7B3F00"/></svg>`,
 
@@ -131,7 +134,7 @@ const EMOJI_FALLBACK: Record<string, string> = {
   kr: '🇰🇷', se: '🇸🇪', no: '🇳🇴', dk: '🇩🇰', fi: '🇫🇮',
   us: '🇺🇸', ca: '🇨🇦', ae: '🇦🇪', bg: '🇧🇬',
   // v2.6.23 — flags for the 19 newly-shipped CWICR cost-database regions
-  au: '🇦🇺', hr: '🇭🇷', id: '🇮🇩', mx: '🇲🇽', ng: '🇳🇬',
+  au: '🇦🇺', hr: '🇭🇷', id: '🇮🇩', mx: '🇲🇽', ng: '🇳🇬', pe: '🇵🇪',
   nz: '🇳🇿', ro: '🇷🇴', th: '🇹🇭', vn: '🇻🇳', za: '🇿🇦',
   // v3.0.4 — Mongolian locale (community contribution; PR #125)
   mn: '🇲🇳',

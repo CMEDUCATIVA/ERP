@@ -145,6 +145,7 @@ const CWICR_REGIONS: CWICRRegionInfo[] = [
   { id: 'IT_ROME', name: 'Italy', flagId: 'it', currency: 'EUR' },
   { id: 'NL_AMSTERDAM', name: 'Netherlands', flagId: 'nl', currency: 'EUR' },
   { id: 'PT_SAOPAULO', name: 'Brazil', flagId: 'br', currency: 'BRL' },
+  { id: 'PE_LIMA', name: 'Peru', flagId: 'pe', currency: 'PEN' },
   { id: 'MX_MEXICOCITY', name: 'Mexico', flagId: 'mx', currency: 'MXN' },
   { id: 'RU_STPETERSBURG', name: 'Russia / CIS', flagId: 'ru', currency: 'RUB' },
   { id: 'PL_WARSAW', name: 'Poland', flagId: 'pl', currency: 'PLN' },
@@ -2739,8 +2740,10 @@ function CreateResourceModal({
   });
 
   const TYPES = ['material', 'equipment', 'labor', 'operator'];
-  const UNITS = ['m', 'm2', 'm3', 'kg', 't', 'pcs', 'lsum', 'hrs', 'Machine hours', 'set', 'l', 'kWh'];
-  const CURRENCIES = ['EUR', 'USD', 'GBP', 'CHF', 'CAD', 'AUD', 'AED', 'RUB', 'CNY', 'INR', 'BRL'];
+  // Construction units - LATAM: hh=man-hour, hm=machine-hour, und=unit, bls=bag, pza=piece, pto=point, gbl=global
+  const UNITS = ['m', 'm2', 'm3', 'kg', 't', 'pcs', 'und', 'lsum', 'hh', 'hm', 'h', 'day', 'month', 'set', 'l', 'gal', 'bls', 'pza', 'pto', 'gbl', 'kWh'];
+  // ISO 4217 currency codes - includes all Latin American currencies
+  const CURRENCIES = ['EUR', 'USD', 'GBP', 'CHF', 'CAD', 'AUD', 'AED', 'RUB', 'CNY', 'INR', 'BRL', 'ARS', 'BOB', 'CLP', 'COP', 'CRC', 'MXN', 'PEN', 'UYU'];
 
   const handleSubmit = useCallback(async () => {
     if (!form.name.trim()) return;

@@ -50,7 +50,16 @@ const TIMEZONES = [
   'America/Denver',
   'America/Los_Angeles',
   'America/Toronto',
+  // ── Latin America ──
+  'America/Argentina/Buenos_Aires',
+  'America/La_Paz',
   'America/Sao_Paulo',
+  'America/Santiago',
+  'America/Bogota',
+  'America/Costa_Rica',
+  'America/Mexico_City',
+  'America/Lima',
+  'America/Montevideo',
 ] as const;
 
 const PAPER_SIZES = [
@@ -73,6 +82,7 @@ interface NumberFormatOption {
 }
 
 const NUMBER_FORMATS: NumberFormatOption[] = [
+  { locale: 'es-PE', label: '1,234.56', example: '1,234.56' },
   { locale: 'de-DE', label: '1.234,56', example: '1.234,56' },
   { locale: 'en-US', label: '1,234.56', example: '1,234.56' },
   { locale: 'fr-FR', label: '1 234,56', example: '1 234,56' },
@@ -101,8 +111,17 @@ const CURRENCIES = [
   { code: 'KRW', symbol: '\u20A9', name: 'South Korean Won' },
   { code: 'AUD', symbol: 'A$', name: 'Australian Dollar' },
   { code: 'CAD', symbol: 'C$', name: 'Canadian Dollar' },
+  // ── Latin America ──
+  { code: 'ARS', symbol: 'AR$', name: 'Argentine Peso' },
+  { code: 'BOB', symbol: 'Bs.', name: 'Bolivian Boliviano' },
   { code: 'BRL', symbol: 'R$', name: 'Brazilian Real' },
+  { code: 'CLP', symbol: 'CL$', name: 'Chilean Peso' },
+  { code: 'COP', symbol: 'CO$', name: 'Colombian Peso' },
+  { code: 'CRC', symbol: '₡', name: 'Costa Rican Colon' },
   { code: 'MXN', symbol: 'MX$', name: 'Mexican Peso' },
+  { code: 'PEN', symbol: 'S/', name: 'Peruvian Sol' },
+  { code: 'UYU', symbol: '$U', name: 'Uruguayan Peso' },
+  // ── Asia-Pacific ──
   { code: 'SGD', symbol: 'S$', name: 'Singapore Dollar' },
   { code: 'NZD', symbol: 'NZ$', name: 'New Zealand Dollar' },
   // Africa

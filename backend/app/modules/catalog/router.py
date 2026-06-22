@@ -135,6 +135,7 @@ REGION_MAP: dict[str, str] = {
     "NG_LAGOS": "NG___DDC_CWICR",
     "NL_AMSTERDAM": "NL___DDC_CWICR",
     "NZ_AUCKLAND": "NZ___DDC_CWICR",
+    "PE_LIMA": "PE___DDC_CWICR",
     "PL_WARSAW": "PL___DDC_CWICR",
     "PT_SAOPAULO": "PT___DDC_CWICR",
     "RO_BUCHAREST": "RO___DDC_CWICR",
