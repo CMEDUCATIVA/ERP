@@ -19,7 +19,6 @@ import {
   FileBarChart,
   Package,
   Settings,
-  Info,
   TrendingUp,
   ChevronDown,
   ChevronRight,
@@ -57,7 +56,6 @@ import {
   EyeOff,
   Pencil,
   Check,
-  Github,
   HardDrive,
   Link2,
   // 18-Modules Wave icons
