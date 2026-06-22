@@ -162,18 +162,17 @@ export function CustomBranding({ iconified }: CustomBrandingProps) {
               >
                 by{' '}
                 <span className="font-semibold tracking-tight">
-                  Open<span className="text-oe-blue/60">Construction</span>
-                  <span className="text-content-quaternary">ERP</span>
+                  CMPROYECTOSBIM
                 </span>
               </span>
             </button>
           ) : (
             <a
-              href="https://openconstructionerp.com/?utm_source=app"
+              href="https://cmproyectosbim.com/"
               target="_blank"
               rel="noopener noreferrer"
               className="flex items-center gap-1 hover:opacity-80 transition-opacity"
-              title="OpenConstructionERP"
+              title="CMPROYECTOSBIM"
             >
               {/* Compact wordmark — 13px text + smaller gap to fit
                   the 248px sidebar minus the 32px edit button without
@@ -187,8 +186,7 @@ export function CustomBranding({ iconified }: CustomBrandingProps) {
                   letterSpacing: '-0.02em',
                 }}
               >
-                Open<span className="text-oe-blue">Construction</span>
-                <span className="text-content-quaternary">ERP</span>
+                CMPROYECTOSBIM
               </span>
             </a>
           )}

@@ -2220,7 +2220,7 @@ const resource = {
     "onboarding.testing": "Probando...",
     "onboarding.welcome_hint": "Gratuito y de código abierto. Sin tarjeta de crédito.",
     "onboarding.welcome_subtitle": "La plataforma profesional de estimación de costes de construcción.\nConfigure su espacio de trabajo en unos sencillos pasos.",
-    "onboarding.welcome_title": "Bienvenido a OpenConstructionERP",
+    "onboarding.welcome_title": "Bienvenido a CMPROYECTOSBIM",
     "onboarding.tour_step": "Paso del recorrido",
     "onboarding.step_label": "Paso",
     "onboarding.step_of_connector": "de",

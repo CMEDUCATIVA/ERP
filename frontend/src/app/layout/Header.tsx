@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+﻿import { useState, useRef, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
@@ -13,7 +13,6 @@ import { useThemeStore } from '@/stores/useThemeStore';
 import { CountryFlag, PartnerLogoBadge } from '@/shared/ui';
 import { usePartnerPack } from '@/shared/hooks/usePartnerPack';
 import { NotificationBell } from '@/shared/ui/NotificationBell';
-import { HeaderNewsButton } from '@/shared/ui/HeaderNewsButton';
 import { apiGet } from '@/shared/lib/api';
 import { copyToClipboard } from '@/shared/lib/browser';
 import {
@@ -26,8 +25,6 @@ import { APP_VERSION, APP_BUILD_FINGERPRINT } from '@/shared/lib/version';
 import { useToastStore } from '@/stores/useToastStore';
 import { useI18nReady } from '@/shared/lib/useI18nReady';
 import { isTauri, openAppInBrowser } from '@/shared/lib/desktop';
-import { SupportUsButton } from './SupportUsButton';
-import { SubscribeButton } from './SubscribeButton';
 import { ProjectJourneyButton } from './ProjectJourney';
 import { getRouteIcon } from './routeIcons';
 
@@ -360,11 +357,6 @@ export function Header({ title, onMenuClick }: HeaderProps) {
             adjacent; Bug + Help sit on the right edge so a user filing a
             report doesn't have to scan past the marketing CTAs. */}
         <NotificationBell />
-        <HeaderNewsButton />
-        <SupportUsButton />
-        <SubscribeButton />
-        <BugReportMenu />
-        <HelpMenu />
 
         {/* Hairline divider between Zone 3 and Zone 4. */}
         <div className="hidden sm:block h-4 w-px bg-white/20" aria-hidden />
@@ -827,7 +819,7 @@ function HelpMenu() {
           </a>
           <a
             role="menuitem"
-            href="https://github.com/datadrivenconstruction/OpenConstructionERP"
+            href="https://github.com/CMEDUCATIVA/ERP"
             target="_blank"
             rel="noopener noreferrer"
             onClick={() => setOpen(false)}
@@ -981,7 +973,7 @@ function LanguageSwitcher({
 /* ── User Menu ─────────────────────────────────────────────────────────── */
 
 /** GitHub repo slug for "Report a bug". Empty string = clipboard fallback. */
-const GITHUB_REPO = 'datadrivenconstruction/OpenConstructionERP';
+const GITHUB_REPO = 'CMEDUCATIVA/ERP';
 /** Hard ceiling for the GitHub issue body inside a URL. ~8KB is safe across browsers. */
 const MAX_BODY_BYTES = 7800;
 
@@ -1411,8 +1403,8 @@ function ProjectSwitcher() {
           // at 1280-1440px; the pill gets its full 260px back on xl+.
           'flex items-stretch rounded-lg border transition-all max-w-[180px] xl:max-w-[260px] overflow-hidden',
           activeProjectId
-            ? 'bg-oe-blue-subtle border-oe-blue/30 hover:bg-oe-blue/10 hover:border-oe-blue/50 shadow-[0_1px_2px_rgba(0,122,255,0.05)]'
-            : 'border-dashed border-oe-blue/40 bg-oe-blue/[0.04] hover:bg-oe-blue/[0.08] hover:border-oe-blue/60',
+            ? 'bg-[#0077ed] border-[#0077ed] hover:bg-[#0066cc] hover:border-[#0066cc]'
+            : 'bg-[#0077ed] border-[#0077ed] hover:bg-[#0066cc] hover:border-[#0066cc]',
         )}
       >
         <button
@@ -1425,10 +1417,8 @@ function ProjectSwitcher() {
             }
           }}
           className={clsx(
-            // WCAG AA fix 2026-05-27: text-oe-blue-text (#0071e3) on bg-oe-blue-subtle
-            // failed 4.35:1; text-oe-blue-text passes at 8.05:1.
-            'flex items-center gap-2 pl-1.5 pr-2 h-9 text-[13px] min-w-0',
-            activeProjectId ? 'text-oe-blue-text' : 'text-oe-blue-text/85 hover:text-oe-blue-text',
+            'flex items-center gap-2 pl-1.5 pr-2 h-9 text-[13px] min-w-0 text-white',
+            activeProjectId ? 'font-semibold' : '',
           )}
           title={activeProjectId
             ? t('projects.open_current', { defaultValue: 'Open this project' })
@@ -1437,14 +1427,14 @@ function ProjectSwitcher() {
           {/* Leading icon square — colored tile in active mode; pulsing
               dot in CTA mode so the eye is drawn to "act here". */}
           {activeProjectId ? (
-            <span className="flex h-6 w-6 items-center justify-center rounded-md bg-oe-blue/15 shrink-0">
-              <FolderOpen size={13} strokeWidth={2} />
+            <span className="flex h-6 w-6 items-center justify-center rounded-md bg-yellow-500 shrink-0">
+              <FolderOpen size={13} strokeWidth={2} className="text-black" />
             </span>
           ) : (
             <span aria-hidden className="flex h-6 w-6 items-center justify-center shrink-0">
               <span className="relative flex h-2 w-2">
-                <span className="absolute inline-flex h-2 w-2 rounded-full bg-oe-blue/60 animate-ping" />
-                <span className="relative inline-flex h-2 w-2 rounded-full bg-oe-blue" />
+                <span className="absolute inline-flex h-2 w-2 rounded-full bg-yellow-400/60 animate-ping" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-yellow-400" />
               </span>
             </span>
           )}
@@ -1464,8 +1454,8 @@ function ProjectSwitcher() {
             // pass even though ChevronDown is presentational.
             'flex items-center px-2 border-l transition-colors',
             activeProjectId
-              ? 'border-oe-blue/20 text-oe-blue-text/70 hover:bg-oe-blue/10 hover:text-oe-blue-text'
-              : 'border-oe-blue/25 border-dashed text-oe-blue-text/60 hover:bg-oe-blue/10 hover:text-oe-blue-text',
+              ? 'border-[#0077ed]/40 text-white/70 hover:bg-[#0066cc] hover:text-white'
+              : 'border-[#0077ed]/40 text-white/70 hover:bg-[#0066cc] hover:text-white',
           )}
           title={t('schedule.switch_project', { defaultValue: 'Switch Project' })}
           aria-label={t('schedule.switch_project', { defaultValue: 'Switch Project' })}
@@ -1493,14 +1483,14 @@ function ProjectSwitcher() {
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder={t('common.search', { defaultValue: 'Search...' })}
-                className="w-full rounded-lg border border-border-light bg-surface-secondary pl-8 pr-3 py-1.5 text-sm text-content-primary placeholder:text-content-quaternary focus:outline-none focus:ring-2 focus:ring-oe-blue/30 focus:border-oe-blue"
+                className="w-full rounded-lg border border-border-light bg-surface-secondary pl-8 pr-3 py-1.5 text-sm text-content-primary placeholder:text-content-quaternary focus:outline-none focus:ring-2 focus:ring-[#0077ed]/30 focus:border-[#0077ed]"
               />
             </div>
           </div>
           <div className="max-h-64 overflow-y-auto py-1">
             {isLoading && (
               <div className="flex items-center gap-2 px-4 py-4 text-sm text-content-tertiary">
-                <span className="inline-block w-3 h-3 border-2 border-oe-blue border-t-transparent rounded-full animate-spin" />
+                <span className="inline-block w-3 h-3 border-2 border-[#0077ed] border-t-transparent rounded-full animate-spin" />
                 {t('common.loading', { defaultValue: 'Loading…' })}
               </div>
             )}
@@ -1511,7 +1501,7 @@ function ProjectSwitcher() {
                 </p>
                 <button
                   onClick={() => refetch()}
-                  className="text-xs text-oe-blue hover:underline"
+                  className="text-xs text-[#0077ed] hover:underline"
                 >
                   {t('common.retry')}
                 </button>
@@ -1536,14 +1526,14 @@ function ProjectSwitcher() {
                 className={clsx(
                   'flex w-full items-center gap-2.5 px-4 py-2 text-sm transition-colors',
                   p.id === activeProjectId
-                    ? 'bg-oe-blue-subtle text-oe-blue-text font-medium'
+                    ? 'bg-[#0077ed]/20 text-[#0077ed] font-medium'
                     : 'text-content-primary hover:bg-surface-secondary',
                 )}
               >
                 <div className={clsx(
                   'flex items-center justify-center w-7 h-7 rounded-md shrink-0',
                   p.id === activeProjectId
-                    ? 'bg-oe-blue/10'
+                    ? 'bg-[#0077ed]/20'
                     : 'bg-surface-tertiary',
                 )}>
                   <FolderOpen size={14} className="shrink-0" />
@@ -1560,7 +1550,7 @@ function ProjectSwitcher() {
               <button
                 type="button"
                 onClick={() => setExpanded(true)}
-                className="w-full px-4 py-2 text-xs font-medium text-oe-blue hover:bg-surface-secondary transition-colors text-center"
+                className="w-full px-4 py-2 text-xs font-medium text-[#0077ed] hover:bg-surface-secondary transition-colors text-center"
               >
                 {t('projects.show_all', {
                   defaultValue: 'Show all ({{count}})',
@@ -1582,7 +1572,7 @@ function ProjectSwitcher() {
             <div className="border-t border-border-light px-4 py-2.5">
               <button
                 onClick={() => { navigate(`/projects/${activeProjectId}`); setOpen(false); }}
-                className="text-xs font-medium text-oe-blue hover:underline"
+                className="text-xs font-medium text-[#0077ed] hover:underline"
               >
                 {t('projects.open_details', { defaultValue: 'Open Project Details' })} &rarr;
               </button>

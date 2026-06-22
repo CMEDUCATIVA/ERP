@@ -62,7 +62,7 @@ const CACHE_KEY = 'oe_update_cache_v1';
 const DISMISS_KEY = 'oe_update_dismissed_version_session';
 
 const GITHUB_RELEASES_API =
-  'https://api.github.com/repos/datadrivenconstruction/OpenConstructionERP/releases/latest';
+  'https://api.github.com/repos/CMEDUCATIVA/ERP/releases/latest';
 
 interface ReleaseInfo {
   version: string;
@@ -294,7 +294,7 @@ export function UpdateNotification({ forceShow = false, hideDismiss = false }: U
         notes: data.body ?? '',
         url:
           data.html_url ??
-          'https://github.com/datadrivenconstruction/OpenConstructionERP/releases',
+          'https://github.com/CMEDUCATIVA/ERP/releases',
         publishedAt: data.published_at ?? '',
       };
       writeCache(info);

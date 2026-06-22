@@ -3970,15 +3970,6 @@ export function CadDataExplorerPage() {
                       <span className="text-xs text-emerald-700 dark:text-emerald-300/90 font-medium">
                         {t('common.local_processing', { defaultValue: '100% Local Processing \u00B7 Your files never leave your computer' })}
                       </span>
-                      <span className="text-[10px] text-emerald-500/40">|</span>
-                      <a
-                        href="https://github.com/datadrivenconstruction/cad2data-Revit-IFC-DWG-DGN-pipeline-with-conversion-validation-qto"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-[10px] text-emerald-600/80 dark:text-emerald-400/70 hover:text-emerald-700 dark:hover:text-emerald-300 hover:underline whitespace-nowrap"
-                      >
-                        {t('common.powered_by_cad2data', { defaultValue: 'Powered by DDC cad2data' })}
-                      </a>
                     </div>
                   </div>
                 </div>

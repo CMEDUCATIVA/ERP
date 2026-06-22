@@ -2888,15 +2888,6 @@ export function DwgTakeoffPage() {
                             ? t('common.local_processing', { defaultValue: '100% Local Processing · Your files never leave your computer' })
                             : t('dwg_takeoff.processed_on_your_server', { defaultValue: 'Processed on your OpenConstructionERP server · never sent to third parties' })}
                         </span>
-                        <span className="text-[10px] text-emerald-500/30">|</span>
-                        <a
-                          href="https://github.com/datadrivenconstruction/cad2data-Revit-IFC-DWG-DGN-pipeline-with-conversion-validation-qto"
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-[10px] text-emerald-400/70 hover:text-emerald-300 hover:underline whitespace-nowrap"
-                        >
-                          {t('common.powered_by_cad2data', { defaultValue: 'Powered by DDC cad2data' })}
-                        </a>
                       </div>
                     </div>
                   </div>

@@ -116,13 +116,13 @@ export function ProjectJourneyButton() {
         })}
         className={clsx(
           'flex h-8 shrink-0 items-center gap-1.5 rounded-lg border px-2.5',
-          'border-border-light bg-white/70 text-content-secondary shadow-sm dark:bg-surface-primary/60',
-          'transition-colors hover:border-oe-blue/40 hover:bg-oe-blue/5 hover:text-content-primary',
+          'border-[#0077ed] bg-[#0077ed] text-white shadow-sm',
+          'transition-colors hover:border-[#0066cc] hover:bg-[#0066cc] hover:text-white',
         )}
       >
-        <RouteIcon size={14} strokeWidth={1.75} className="shrink-0 text-oe-blue" aria-hidden />
-        <span className="whitespace-nowrap text-xs font-semibold">{label}</span>
-        <ChevronDown size={12} strokeWidth={2} className="shrink-0 text-content-quaternary" aria-hidden />
+        <RouteIcon size={14} strokeWidth={1.75} className="shrink-0 text-white" aria-hidden />
+        <span className="whitespace-nowrap text-xs font-semibold text-white">{label}</span>
+        <ChevronDown size={12} strokeWidth={2} className="shrink-0 text-white/70" aria-hidden />
       </button>
       {open && (
         <ProjectJourneyPanel

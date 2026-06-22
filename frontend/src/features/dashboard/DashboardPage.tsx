@@ -2407,20 +2407,15 @@ function DashboardPageInner() {
 
       {/* ─── 2. Hero · row B — thin meta-strip ───────────────────────── */}
       <div className="flex items-center flex-wrap gap-x-4 gap-y-2 pl-2 animate-stagger-in" style={{ animationDelay: '140ms' }}>
-        {/* DDC attribution — slim inline link with tiny logo */}
+        {/* CMPROYECTOSBIM — slim inline link */}
         <a
-          href="https://datadrivenconstruction.io/?utm_source=erp"
+          href="https://cmproyectosbim.com/"
           target="_blank"
           rel="noopener noreferrer"
           className="group/ddc inline-flex items-center gap-1.5 text-[11px] text-content-tertiary hover:text-content-secondary transition-colors"
         >
-          <img
-            src="/brand/ddc-logo.webp"
-            alt="DataDrivenConstruction"
-            className="h-3.5 w-auto opacity-60 group-hover/ddc:opacity-100 transition-opacity"
-          />
-          <span className="hidden sm:inline">
-            {t('dashboard.developed_by_short', { defaultValue: 'by DataDrivenConstruction' })}
+          <span className="hidden sm:inline font-semibold">
+            CMPROYECTOSBIM
           </span>
         </a>
 
@@ -2428,7 +2423,7 @@ function DashboardPageInner() {
 
         {/* Open-source pill — slimmer (was a heavy gradient card) */}
         <a
-          href="https://github.com/datadrivenconstruction/OpenConstructionERP"
+          href="https://github.com/CMEDUCATIVA/ERP"
           target="_blank"
           rel="noopener noreferrer"
           className="group/oss inline-flex items-center gap-2 text-xs font-medium text-content-secondary hover:text-content-primary transition-colors"
@@ -2437,7 +2432,7 @@ function DashboardPageInner() {
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
             <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
           </span>
-          <span>{t('dashboard.open_source_badge', { defaultValue: 'Open-source construction ERP' })}</span>
+          <span>CDE para la construcción</span>
           <ExternalLink size={11} className="text-content-quaternary group-hover/oss:text-oe-blue transition-colors" />
         </a>
 
