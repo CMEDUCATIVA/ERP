@@ -109,8 +109,6 @@ export function LoginPage() {
   const [langOpen, setLangOpen] = useState(false);
   const [showInfo, setShowInfo] = useState(false);
   const [brandOpen, setBrandOpen] = useState(false);
-  const [demoOpen, setDemoOpen] = useState(true);
-  const [demoLoading, setDemoLoading] = useState<string | null>(null);
   const langRef = useRef<HTMLDivElement>(null);
 
   // Desktop first-run: when running inside the Tauri shell with no stored
@@ -222,82 +220,6 @@ export function LoginPage() {
       setError(t('auth.connection_error', 'Unable to connect to server. Please try again.'));
     } finally {
       setLoading(false);
-    }
-  };
-
-  const demoAccounts = [
-    { email: 'demo@openconstructionerp.com', name: 'Admin', role: t('auth.demo_role_admin', 'Administrator'), color: 'bg-blue-500', letter: 'A' },
-    { email: 'manager@openconstructionerp.com', name: 'Thomas Müller', role: t('auth.demo_role_manager', 'Manager'), color: 'bg-[#7cd0ff]', letter: 'M' },
-  ];
-
-  const handleDemoLogin = async (demoEmail: string) => {
-    setDemoLoading(demoEmail);
-    setError('');
-    setEmail('');
-    setPassword('');
-    try {
-      // Use the dedicated demo-login endpoint (v2.6.22) which mints tokens
-      // for seeded demo accounts without a password - necessary because the
-      // backend seeder generates a fresh `secrets.token_urlsafe(16)` per
-      // install (BUG-D01) and the frontend has no way to read it.
-      let res = await fetch('/api/v1/users/auth/demo-login/', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: demoEmail }),
-      });
-
-      // Fallback path: if the server is older than v2.6.22 it returns 404
-      // for /demo-login/. Try the legacy login + auto-register pair so
-      // existing deployments don't break the moment we ship the new client.
-      if (res.status === 404) {
-        res = await fetch('/api/v1/users/auth/login/', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: demoEmail, password: 'DemoPass1234!' }),
-        });
-        if (!res.ok) {
-          const errData = await res.json().catch(() => null);
-          const parsedMsg = extractErrorMessageFromBody(errData) ?? '';
-          if (
-            parsedMsg.includes('Invalid') ||
-            parsedMsg.includes('not found') ||
-            res.status === 401
-          ) {
-            const regRes = await fetch('/api/v1/users/auth/register/', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                email: demoEmail,
-                password: 'DemoPass1234!',
-                full_name: (demoEmail.split('@')[0] ?? 'Demo User')
-                  .replace(/[._]/g, ' ')
-                  .replace(/\b\w/g, (c) => c.toUpperCase()),
-              }),
-            });
-            if (regRes.ok) {
-              res = await fetch('/api/v1/users/auth/login/', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email: demoEmail, password: 'DemoPass1234!' }),
-              });
-            }
-          }
-        }
-      }
-
-      if (!res.ok) {
-        const data = await res.json().catch(() => null);
-        const parsed = extractErrorMessageFromBody(data);
-        setError(parsed || t('auth.demo_login_failed', 'Demo login failed. Please try again.'));
-        return;
-      }
-      const data = await res.json();
-      setTokens(data.access_token, data.refresh_token, false, demoEmail);
-      navigate(nextPath, { replace: true });
-    } catch {
-      setError(t('auth.connection_error', 'Unable to connect to server. Please try again.'));
-    } finally {
-      setDemoLoading(null);
     }
   };
 
@@ -665,9 +587,9 @@ export function LoginPage() {
         <div className="mt-4 space-y-1 animate-stagger-in" style={{ animationDelay: '380ms' }}>
           <div className="flex items-center gap-2 text-[11px] text-content-quaternary/60">
             <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" className="opacity-40"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
-            <a href="/api/source" target="_blank" rel="noopener noreferrer" className="hover:text-content-tertiary transition-colors">AGPL-3.0</a>
+            <a href="https://github.com/CMEDUCATIVA/ERP" target="_blank" rel="noopener noreferrer" className="hover:text-content-tertiary transition-colors">AGPL-3.0</a>
             <span className="opacity-30">&middot;</span>
-            <a href="https://OpenConstructionERP.com" target="_blank" rel="noopener noreferrer" className="hover:text-content-tertiary transition-colors">OpenConstructionERP.com</a>
+            <a href="https://cmproyectosbim.com/" target="_blank" rel="noopener noreferrer" className="hover:text-content-tertiary transition-colors">cmproyectosbim.com</a>
           </div>
         </div>
       </div>
@@ -718,16 +640,14 @@ export function LoginPage() {
                       {brandName}
                     </span>
                   )}
-                  {/* "by OpenConstructionERP" - subordinate attribution that
-                      stays visible (AGPL-3.0). Mirrors CustomBranding.tsx. */}
+                  {/* "by CMPROYECTOSBIM" - subordinate attribution */}
                   <span
                     className="mt-2 block text-[11px] leading-none text-content-tertiary"
                     style={{ fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif", letterSpacing: '0.02em' }}
                   >
                     by{' '}
                     <span className="font-semibold tracking-tight">
-                      Open<span className="text-oe-blue/80">Construction</span>
-                      <span className="text-content-quaternary">ERP</span>
+                      CMPROYECTOSBIM
                     </span>
                   </span>
                 </div>
@@ -738,7 +658,7 @@ export function LoginPage() {
                     className="text-2xl font-extrabold text-content-primary whitespace-nowrap"
                     style={{ fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif", letterSpacing: '-0.02em' }}
                   >
-                    Open<span className="text-oe-blue">Construction</span><span className="text-content-quaternary font-semibold">ERP</span>
+                    CMPROYECTOSBIM
                   </span>
                 </div>
               )}
@@ -854,57 +774,6 @@ export function LoginPage() {
             </div>
           </div>
 
-          {/* Demo Access */}
-          <div className="mt-3 animate-stagger-in" style={{ animationDelay: '500ms' }}>
-            <div className="login-glass-pro relative rounded-2xl overflow-hidden">
-              <div
-                aria-hidden
-                className="pointer-events-none absolute inset-x-6 top-0 h-px"
-                style={{
-                  background:
-                    'linear-gradient(90deg, transparent, rgba(255,255,255,0.95), transparent)',
-                }}
-              />
-              <button
-                type="button"
-                onClick={() => setDemoOpen(!demoOpen)}
-                aria-expanded={demoOpen}
-                className="flex w-full items-center justify-center gap-2 px-5 py-2.5 text-sm font-semibold text-oe-blue hover:bg-oe-blue/[0.04] transition-all"
-              >
-                <Zap size={14} className="text-oe-blue" />
-                <span>{t('auth.try_demo', { defaultValue: 'Try demo (no signup)' })}</span>
-                <ChevronDown size={14} className={`text-oe-blue/70 transition-transform duration-200 ${demoOpen ? 'rotate-180' : ''}`} />
-              </button>
-
-              {demoOpen && (
-                <div className="border-t border-border-light/60 px-3 py-2.5 space-y-1.5 animate-stagger-in">
-                  {demoAccounts.map((acct) => (
-                    <button
-                      key={acct.email}
-                      type="button"
-                      onClick={() => handleDemoLogin(acct.email)}
-                      disabled={demoLoading !== null}
-                      className="flex w-full items-center gap-3 rounded-xl border border-border-light/50 dark:border-white/12 bg-surface-secondary/50 dark:bg-white/[0.06] px-3.5 py-2.5 text-left transition-all hover:border-oe-blue/40 hover:bg-oe-blue/[0.05] dark:hover:bg-oe-blue/[0.14] hover:shadow-sm disabled:opacity-50 group"
-                    >
-                      <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${acct.color} text-white text-sm font-bold shadow-sm`}>
-                        {demoLoading === acct.email ? (
-                          <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" /></svg>
-                        ) : (
-                          acct.letter
-                        )}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="text-[13px] font-semibold text-content-primary">{acct.name}</div>
-                        <div className="text-[11px] text-content-tertiary dark:text-content-secondary truncate">{acct.email} · {acct.role}</div>
-                      </div>
-                      <ChevronDown size={15} className="text-content-quaternary -rotate-90 group-hover:text-oe-blue transition-colors shrink-0" />
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-
           {/* GitHub + Community - two primary entry points for the
               open-source project (replaces the old single "Learn more"
               link). Premium two-line cards with a tinted icon badge:
@@ -912,7 +781,7 @@ export function LoginPage() {
               community hub. Mirrors the page's login-glass-pro language. */}
           <div className="mt-4 grid grid-cols-2 gap-3 animate-stagger-in" style={{ animationDelay: '520ms' }}>
             <a
-              href="https://github.com/datadrivenconstruction/OpenConstructionERP"
+              href="https://github.com/CMEDUCATIVA/ERP"
               target="_blank"
               rel="noopener noreferrer"
               aria-label={`${t('login.github', { defaultValue: 'GitHub' })} - ${t('login.github_sub', { defaultValue: 'Source code' })}`}
@@ -935,7 +804,7 @@ export function LoginPage() {
               />
             </a>
             <a
-              href="https://t.me/datadrivenconstruction"
+              href="https://comunidadbim.org/"
               target="_blank"
               rel="noopener noreferrer"
               aria-label={`${t('login.community', { defaultValue: 'Community' })} - ${t('login.community_sub', { defaultValue: 'Get help & discuss' })}`}
@@ -960,9 +829,9 @@ export function LoginPage() {
           </div>
           <div className="lg:hidden mt-2 text-center text-2xs text-content-quaternary">
             <div className="flex items-center justify-center gap-3">
-              <a href="https://OpenConstructionERP.com" target="_blank" rel="noopener noreferrer" className="hover:text-content-secondary transition-colors">OpenConstructionERP.com</a>
+              <a href="https://cmproyectosbim.com/" target="_blank" rel="noopener noreferrer" className="hover:text-content-secondary transition-colors">cmproyectosbim.com</a>
               <span>·</span>
-              <a href="https://github.com/datadrivenconstruction/OpenConstructionERP" target="_blank" rel="noopener noreferrer" className="hover:text-content-secondary transition-colors">GitHub</a>
+              <a href="https://github.com/CMEDUCATIVA/ERP" target="_blank" rel="noopener noreferrer" className="hover:text-content-secondary transition-colors">GitHub</a>
             </div>
           </div>
         </div>

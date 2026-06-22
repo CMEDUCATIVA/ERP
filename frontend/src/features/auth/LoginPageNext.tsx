@@ -21,8 +21,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import { useNavigate, Link, useLocation } from 'react-router-dom';
 import {
-  Eye, EyeOff, Mail, Lock, Globe, ChevronDown, Zap,
-  ArrowUpRight,
+  Eye, EyeOff, Mail, Lock, Globe, ChevronDown,
   Table2, Database, Layers, Box, Ruler, Sparkles,
   CalendarDays, ShieldCheck, BrainCircuit, Boxes,
 } from 'lucide-react';
@@ -74,8 +73,6 @@ export function LoginPageNext() {
     () => localStorage.getItem('oe_remember') === '1',
   );
   const [langOpen, setLangOpen] = useState(false);
-  const [demoOpen, setDemoOpen] = useState(true);
-  const [demoLoading, setDemoLoading] = useState<string | null>(null);
   const langRef = useRef<HTMLDivElement>(null);
   const heroRef = useRef<HTMLDivElement>(null);
 
@@ -130,75 +127,6 @@ export function LoginPageNext() {
       setError(t('auth.connection_error', 'Unable to connect to server. Please try again.'));
     } finally {
       setLoading(false);
-    }
-  };
-
-  const demoAccounts = [
-    { email: 'demo@openconstructionerp.com', name: 'Admin', role: t('auth.demo_role_admin', 'Administrator'), color: 'bg-blue-500', letter: 'A' },
-    { email: 'manager@openconstructionerp.com', name: 'Thomas Müller', role: t('auth.demo_role_manager', 'Manager'), color: 'bg-amber-500', letter: 'M' },
-  ];
-
-  const handleDemoLogin = async (demoEmail: string) => {
-    setDemoLoading(demoEmail);
-    setError('');
-    setEmail('');
-    setPassword('');
-    try {
-      let res = await fetch('/api/v1/users/auth/demo-login/', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: demoEmail }),
-      });
-
-      if (res.status === 404) {
-        res = await fetch('/api/v1/users/auth/login/', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: demoEmail, password: 'DemoPass1234!' }),
-        });
-        if (!res.ok) {
-          const errData = await res.json().catch(() => null);
-          const parsedMsg = extractErrorMessageFromBody(errData) ?? '';
-          if (
-            parsedMsg.includes('Invalid') ||
-            parsedMsg.includes('not found') ||
-            res.status === 401
-          ) {
-            const regRes = await fetch('/api/v1/users/auth/register/', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                email: demoEmail,
-                password: 'DemoPass1234!',
-                full_name: (demoEmail.split('@')[0] ?? 'Demo User')
-                  .replace(/[._]/g, ' ')
-                  .replace(/\b\w/g, (c) => c.toUpperCase()),
-              }),
-            });
-            if (regRes.ok) {
-              res = await fetch('/api/v1/users/auth/login/', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email: demoEmail, password: 'DemoPass1234!' }),
-              });
-            }
-          }
-        }
-      }
-
-      if (!res.ok) {
-        const data = await res.json().catch(() => null);
-        const parsed = extractErrorMessageFromBody(data);
-        setError(parsed || t('auth.demo_login_failed', 'Demo login failed. Please try again.'));
-        return;
-      }
-      const data = await res.json();
-      setTokens(data.access_token, data.refresh_token, false, demoEmail);
-      navigate(nextPath, { replace: true });
-    } catch {
-      setError(t('auth.connection_error', 'Unable to connect to server. Please try again.'));
-    } finally {
-      setDemoLoading(null);
     }
   };
 
@@ -555,7 +483,7 @@ export function LoginPageNext() {
             >
               Artem Boiko
             </a>{' '}
-            · OpenConstructionERP
+            · CMPROYECTOSBIM
             · <a href="mailto:info@datadrivenconstruction.io" className="hover:text-content-secondary transition-colors">info@datadrivenconstruction.io</a>
           </div>
         </div>
@@ -571,7 +499,7 @@ export function LoginPageNext() {
                   className="mt-2.5 text-xl font-extrabold tracking-[-0.02em] text-content-primary dark:text-white"
                   style={{ fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif" }}
                 >
-                  Open<span className="text-oe-blue">Construction</span><span className="text-content-quaternary font-semibold">ERP</span>
+                  CMPROYECTOSBIM
                 </span>
               </div>
 
@@ -582,7 +510,7 @@ export function LoginPageNext() {
                   className="text-[15px] font-extrabold tracking-[-0.02em] text-content-primary dark:text-white"
                   style={{ fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif" }}
                 >
-                  Open<span className="text-oe-blue">Construction</span><span className="text-content-quaternary font-semibold dark:text-white/50">ERP</span>
+                  CMPROYECTOSBIM
                 </span>
               </div>
 
@@ -685,52 +613,6 @@ export function LoginPageNext() {
                   {t('auth.login', 'Sign in')}
                 </Button>
               </form>
-
-              {/* Demo accounts */}
-              <div className="mt-6 animate-stagger-in" style={{ animationDelay: '260ms' }}>
-                <button
-                  type="button"
-                  onClick={() => setDemoOpen(!demoOpen)}
-                  className="flex w-full items-center justify-center gap-2 rounded-xl border border-border-light bg-surface-primary px-4 py-2.5 text-sm text-content-secondary hover:text-oe-blue hover:border-oe-blue/40 transition-all"
-                >
-                  <Zap size={14} className="text-oe-blue" />
-                  <span className="font-semibold">{t('auth.demo_access', 'Demo Access')}</span>
-                  <ChevronDown
-                    size={14}
-                    className={`text-content-tertiary transition-transform duration-200 ${demoOpen ? 'rotate-180' : ''}`}
-                  />
-                </button>
-
-                {demoOpen && (
-                  <div className="mt-2 space-y-1.5 animate-stagger-in">
-                    {demoAccounts.map((acct) => (
-                      <button
-                        key={acct.email}
-                        type="button"
-                        onClick={() => handleDemoLogin(acct.email)}
-                        disabled={demoLoading !== null}
-                        className="oe-glass-lite group flex w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-left transition-all hover:translate-y-[-1px] hover:border-oe-blue/30 disabled:opacity-50"
-                      >
-                        <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${acct.color} text-white text-sm font-bold shadow-sm`}>
-                          {demoLoading === acct.email ? (
-                            <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
-                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                            </svg>
-                          ) : (
-                            acct.letter
-                          )}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="text-[13px] font-semibold text-content-primary dark:text-white">{acct.name}</div>
-                          <div className="text-[11px] text-content-tertiary truncate">{acct.email} · {acct.role}</div>
-                        </div>
-                        <ArrowUpRight size={15} className="text-content-quaternary group-hover:text-oe-blue transition-colors shrink-0" />
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
 
               {/* Footer */}
               <div className="mt-7 animate-stagger-in" style={{ animationDelay: '340ms' }}>
