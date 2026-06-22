@@ -1744,7 +1744,7 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
             because the card is text-heavy; users will still see it after
             expanding the sidebar. `mt-3` breathes the card away from the
             admin grid buttons above. */}
-        {!iconified && (
+        {!iconified && userRole === 'admin' && (
           <div className="mt-3">
             <UpdateNotification />
           </div>
