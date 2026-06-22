@@ -13,7 +13,16 @@ const STORAGE_KEY = 'oe_preferences';
 
 export type MeasurementSystem = 'metric' | 'imperial';
 export type DateFormat = 'DD.MM.YYYY' | 'MM/DD/YYYY' | 'YYYY-MM-DD';
-export type NumberLocale = 'de-DE' | 'en-US' | 'en-GB' | 'fr-FR' | 'ru-RU' | 'ar-SA' | 'ja-JP' | 'zh-CN';
+export type NumberLocale =
+  | 'de-DE'
+  | 'en-US'
+  | 'en-GB'
+  | 'fr-FR'
+  | 'ru-RU'
+  | 'ar-SA'
+  | 'ja-JP'
+  | 'zh-CN'
+  | 'es-PE';
 
 interface Preferences {
   currency: string;
