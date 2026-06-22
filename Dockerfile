@@ -8,7 +8,7 @@
 FROM node:22-alpine AS frontend-build
 
 WORKDIR /build
-ENV NODE_OPTIONS=--max-old-space-size=6144
+ENV NODE_OPTIONS=--max-old-space-size=8192
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci --ignore-scripts
 COPY frontend/ .

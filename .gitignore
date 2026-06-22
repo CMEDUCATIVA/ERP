@@ -212,6 +212,7 @@ backend/data/dwg_thumbnails/
 
 # Local-only working state (not for commit)
 tmp/
+_github_push_ERP/
 backend/_frontend_dist/
 backend/app/_frontend_dist/
 backend/*.log.err

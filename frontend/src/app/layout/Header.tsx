@@ -15,12 +15,10 @@ import { CountryFlag, PartnerLogoBadge } from '@/shared/ui';
 import { usePartnerPack } from '@/shared/hooks/usePartnerPack';
 import { NotificationBell } from '@/shared/ui/NotificationBell';
 import { apiGet } from '@/shared/lib/api';
-import {,
-  getLastError,
-} from '@/shared/lib/errorLogger';
+import { getLastError } from '@/shared/lib/errorLogger';
 import { APP_VERSION, APP_BUILD_FINGERPRINT } from '@/shared/lib/version';
 import { useI18nReady } from '@/shared/lib/useI18nReady';
-import \{ isTauri \} from '@/shared/lib/desktop';
+import { isTauri } from '@/shared/lib/desktop';
 import { ProjectJourneyButton } from './ProjectJourney';
 import { getRouteIcon } from './routeIcons';
 
