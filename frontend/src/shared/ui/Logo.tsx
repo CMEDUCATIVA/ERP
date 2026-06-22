@@ -26,32 +26,7 @@ const sizeMap = {
  *   4. Windows fade in
  */
 export function Logo({ size = 'md', animate = false, className }: LogoProps) {
-  const isSmall = size === 'xs' || size === 'sm';
   const gradientId = `oe-lg-${size}-${animate ? 'a' : 's'}`;
-
-  const barStyle = (delay: number, _height: number) =>
-    animate
-      ? {
-          transformOrigin: 'bottom',
-          animation: `oeBarGrow 500ms cubic-bezier(0.34,1.56,0.64,1) both`,
-          animationDelay: `${delay}ms`,
-        }
-      : undefined;
-
-  const buildingStyle = animate
-    ? {
-        animation: `oeBuildingSlide 600ms cubic-bezier(0.22,1,0.36,1) both`,
-        animationDelay: '300ms',
-      }
-    : undefined;
-
-  const windowStyle = (delay: number) =>
-    animate
-      ? {
-          animation: `oeWindowFade 400ms ease both`,
-          animationDelay: `${delay}ms`,
-        }
-      : undefined;
 
   const bgStyle = animate
     ? {
