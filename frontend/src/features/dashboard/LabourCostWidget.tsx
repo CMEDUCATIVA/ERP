@@ -18,18 +18,13 @@ import { Card, CardContent, CardHeader } from '@/shared/ui';
 import { useProjectContextStore } from '@/stores/useProjectContextStore';
 import { fetchLabourCost } from '@/features/payroll/api';
 import { costModelApi } from '@/features/costmodel/api';
+import { formatCurrencyDisplay } from '@/shared/lib/formatters';
 
 function money(value: number, currency?: string): string {
   if (!Number.isFinite(value)) return '-';
-  try {
-    return new Intl.NumberFormat(undefined, {
-      style: currency ? 'currency' : 'decimal',
-      currency: currency || undefined,
-      maximumFractionDigits: 0,
-    }).format(value);
-  } catch {
-    return value.toFixed(0);
-  }
+  return formatCurrencyDisplay(value, currency, {
+    maximumFractionDigits: 0,
+  });
 }
 
 export function LabourCostWidget() {

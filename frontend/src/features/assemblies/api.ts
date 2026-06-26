@@ -34,7 +34,11 @@ export interface ComponentMetadata {
   // Equipment
   rental_days?: number;
   hourly_rate?: number;
-  fuel_cost?: number;
+  fuel_cost?: number;                // fuel per day (legacy)
+  fuel_cost_per_hour?: number;       // combustible / hora operación
+  acquisition_value?: number;        // valor de adquisición (S/)
+  useful_life_years?: number;        // vida útil en años
+  maintenance_pct?: number;          // % mantenimiento anual
   // Generic
   notes?: string;
   resource_type?: ResourceType;
@@ -76,6 +80,7 @@ export interface Assembly {
   component_count: number;
   usage_count: number;
   tags: string[];
+  metadata: Record<string, unknown>;
   created_at: string;
   updated_at: string;
 }
@@ -129,6 +134,7 @@ export interface CreateAssemblyData {
   currency?: string;
   bid_factor?: number;
   project_id?: string;
+  metadata?: Record<string, unknown>;
 }
 
 export interface CreateComponentData {

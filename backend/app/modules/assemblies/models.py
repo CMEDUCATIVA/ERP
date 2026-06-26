@@ -10,8 +10,8 @@ Tables:
 
 import uuid
 
-from sqlalchemy import JSON, Boolean, ForeignKey, Integer, String, Text
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy import JSON, Boolean, ForeignKey, Integer, String, Text, func, select
+from sqlalchemy.orm import Mapped, column_property, mapped_column, relationship
 
 from app.database import GUID, Base
 
@@ -118,6 +118,17 @@ class Component(Base):
 
     def __repr__(self) -> str:
         return f"<Component {self.description[:40]} (factor={self.factor})>"
+
+
+# Virtual column on Assembly — counts components via subquery without loading them.
+# Defined after Component so the class name is available.
+Assembly.component_count = column_property(
+    select(func.count(Component.id))
+    .where(Component.assembly_id == Assembly.id)
+    .correlate_except(Component)
+    .scalar_subquery(),
+    deferred=True,
+)
 
 
 class AssemblyTemplate(Base):

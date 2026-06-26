@@ -7,7 +7,7 @@ No business logic - pure data access.
 import uuid
 from decimal import Decimal
 
-from sqlalchemy import func, select, update
+from sqlalchemy import delete as sa_delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.sql_numeric import numeric_value
@@ -215,3 +215,42 @@ class CatalogResourceRepository:
             await self.session.execute(del_stmt)
 
         return count
+
+    async def rename_category(self, old_name: str, new_name: str) -> int:
+        """Bulk-rename a category across all active resources. Returns count updated."""
+        stmt = (
+            update(CatalogResource)
+            .where(
+                CatalogResource.category == old_name,
+                CatalogResource.is_active.is_(True),
+            )
+            .values(category=new_name)
+        )
+        result = await self.session.execute(stmt)
+        await self.session.flush()
+        return result.rowcount
+
+    async def delete_category(self, name: str, reassign_to: str = "Custom") -> int:
+        """Reassign all resources of a category to another category. Returns count reassigned.
+
+        Categories are soft-deleted by reassigning their resources rather
+        than hard-deleting rows. A category with zero resources is effectively
+        gone.
+        """
+        stmt = (
+            update(CatalogResource)
+            .where(
+                CatalogResource.category == name,
+                CatalogResource.is_active.is_(True),
+            )
+            .values(category=reassign_to)
+        )
+        result = await self.session.execute(stmt)
+        await self.session.flush()
+        return result.rowcount
+
+    async def delete_by_id(self, resource_id: uuid.UUID) -> bool:
+        """Hard-delete a single catalog resource by ID. Returns True if deleted."""
+        stmt = sa_delete(CatalogResource).where(CatalogResource.id == resource_id)
+        result = await self.session.execute(stmt)
+        return result.rowcount > 0

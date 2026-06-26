@@ -45,7 +45,7 @@ import { CostBenchmark } from './CostBenchmark';
 import { CostSpinePanel } from './CostSpinePanel';
 import { costmodelGuide } from './costmodelGuide';
 import { BudgetLineThresholdEditor, parseThreshold } from './BudgetLineThresholdEditor';
-import { getIntlLocale } from '@/shared/lib/formatters';
+import { formatCurrencyDisplay, getIntlLocale } from '@/shared/lib/formatters';
 
 /* ── Types ─────────────────────────────────────────────────────────────── */
 
@@ -69,16 +69,10 @@ interface BOQ {
 
 function formatCurrency(amount: number, currency: string): string {
   const safe = /^[A-Z]{3}$/.test(currency) ? currency : 'EUR';
-  try {
-    return new Intl.NumberFormat(getIntlLocale(), {
-      style: 'currency',
-      currency: safe,
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(amount);
-  } catch {
-    return `${amount.toFixed(0)} ${safe}`;
-  }
+  return formatCurrencyDisplay(amount, safe, {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  });
 }
 
 function formatCompact(amount: number, currency: string): string {
@@ -1950,11 +1944,9 @@ function MonteCarloPanel({ projectId, currency }: { projectId: string; currency:
           maximumFractionDigits: 0,
         }).format(n);
       }
-      return new Intl.NumberFormat(getIntlLocale(), {
-        style: 'currency',
-        currency: trimmed,
+      return formatCurrencyDisplay(n, trimmed, {
         maximumFractionDigits: 0,
-      }).format(n);
+      });
     },
     [currency],
   );

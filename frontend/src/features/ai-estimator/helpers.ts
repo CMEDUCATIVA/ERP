@@ -8,6 +8,7 @@
 
 import type { ConfidenceBand, GroupStatus, RunStatus, ValidationStatus } from './api';
 import { DEFAULT_THRESHOLDS, type ScoreThresholds } from './meta';
+import { formatCurrencyDisplay } from '@/shared/lib/formatters';
 
 /** Tailwind classes for a score badge (matches AICostFinderPanel).
  *
@@ -130,15 +131,10 @@ export function fmtMoneyStr(
   if (value == null || value === '') return '-';
   const n = Number(value);
   if (Number.isNaN(n)) return `${value} ${currency ?? ''}`.trim();
-  try {
-    return new Intl.NumberFormat(locale, {
-      style: currency ? 'currency' : 'decimal',
-      currency: currency || undefined,
-      maximumFractionDigits: 2,
-    }).format(n);
-  } catch {
-    return `${n.toFixed(2)} ${currency ?? ''}`.trim();
-  }
+  return formatCurrencyDisplay(n, currency, {
+    locale,
+    maximumFractionDigits: 2,
+  });
 }
 
 /** Resource-type -> short badge classes (labor/material/equipment/...). */

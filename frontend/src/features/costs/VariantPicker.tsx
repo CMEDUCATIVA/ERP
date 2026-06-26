@@ -28,7 +28,7 @@ import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { X, Search, ArrowUpDown, ChevronDown, ChevronRight } from 'lucide-react';
 import { Badge, Button, KvList, Kv, QtyTile } from '@/shared/ui';
-import { getIntlLocale } from '@/shared/lib/formatters';
+import { formatCurrencyDisplay, getIntlLocale } from '@/shared/lib/formatters';
 import type { CostVariant, VariantStats } from './api';
 
 /* ── Props ────────────────────────────────────────────────────────────── */
@@ -74,20 +74,10 @@ function formatPrice(value: number, currency: string): string {
       maximumFractionDigits: 2,
     }).format(value);
   }
-  try {
-    return new Intl.NumberFormat(getIntlLocale(), {
-      style: 'currency',
-      currency,
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(value);
-  } catch {
-    const n = new Intl.NumberFormat(getIntlLocale(), {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(value);
-    return `${n} ${currency}`;
-  }
+  return formatCurrencyDisplay(value, currency, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
 }
 
 /** Resolve the initial selected index per the design rule. */

@@ -72,6 +72,7 @@ import { useProjectContextStore } from '@/stores/useProjectContextStore';
 import { useRecentStore } from '@/stores/useRecentStore';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useToastStore } from '@/stores/useToastStore';
+import { formatCurrencyDisplay } from '@/shared/lib/formatters';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -200,16 +201,11 @@ function formatCurrency(value: number, currency?: string): string {
   if (!/^[A-Z]{3}$/.test(trimmed)) {
     return '—';
   }
-  try {
-    return new Intl.NumberFormat(i18n.language, {
-      style: 'currency',
-      currency: trimmed,
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(value);
-  } catch {
-    return `${value.toFixed(2)} ${trimmed}`;
-  }
+  return formatCurrencyDisplay(value, trimmed, {
+    locale: i18n.language,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
 }
 
 function formatDate(iso: string, locale = 'en-US'): string {

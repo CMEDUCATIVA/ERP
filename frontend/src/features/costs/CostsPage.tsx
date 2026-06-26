@@ -37,7 +37,7 @@ import { Button, Card, Badge, EmptyState, SkeletonTable, CountryFlag, CountryFla
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { useConfirm } from '@/shared/hooks/useConfirm';
 import { apiGet, apiPost, apiPatch, apiDelete, triggerDownload, extractErrorMessageFromBody } from '@/shared/lib/api';
-import { getIntlLocale } from '@/shared/lib/formatters';
+import { formatCurrencyDisplay, getIntlLocale } from '@/shared/lib/formatters';
 import { copyToClipboard } from '@/shared/lib/browser';
 import { useToastStore } from '@/stores/useToastStore';
 import { useProjectContextStore } from '@/stores/useProjectContextStore';
@@ -972,12 +972,10 @@ export function CostsPage() {
     const code = (currency || regionCurrency || '').trim().toUpperCase();
     if (!code) return fmt(n);
     try {
-      return new Intl.NumberFormat(getIntlLocale(), {
-        style: 'currency',
-        currency: code,
+      return formatCurrencyDisplay(n, code, {
         minimumFractionDigits: 2,
         maximumFractionDigits: 2,
-      }).format(n);
+      });
     } catch {
       // Non-ISO / unsupported code — keep the figure legible and still
       // show the raw code rather than dropping it silently.
@@ -1845,12 +1843,10 @@ function AddToBOQModal({
     const code = (currency || '').trim().toUpperCase();
     if (!code) return fmt(n);
     try {
-      return new Intl.NumberFormat(getIntlLocale(), {
-        style: 'currency',
-        currency: code,
+      return formatCurrencyDisplay(n, code, {
         minimumFractionDigits: 2,
         maximumFractionDigits: 2,
-      }).format(n);
+      });
     } catch {
       return `${fmt(n)} ${code}`;
     }

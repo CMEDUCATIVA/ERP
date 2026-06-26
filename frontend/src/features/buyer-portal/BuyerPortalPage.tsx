@@ -68,6 +68,7 @@ import {
 
 import { BetaBanner, ModuleGuideButton } from '@/shared/ui';
 import { SUPPORTED_LANGUAGES } from '@/app/i18n';
+import { formatCurrencyDisplay } from '@/shared/lib/formatters';
 
 import { buyerPortalGuide } from './buyerPortalGuide';
 
@@ -1971,15 +1972,10 @@ function formatMoney(amount: string, currency: string, locale: string): string {
   if (!amount) return '';
   const value = Number(amount);
   if (!isFinite(value)) return amount;
-  try {
-    return new Intl.NumberFormat(locale || 'en', {
-      style: 'currency',
-      currency: (currency || 'EUR').toUpperCase(),
-      maximumFractionDigits: 2,
-    }).format(value);
-  } catch {
-    return `${amount} ${currency}`.trim();
-  }
+  return formatCurrencyDisplay(value, (currency || 'EUR').toUpperCase(), {
+    locale: locale || 'en',
+    maximumFractionDigits: 2,
+  });
 }
 
 function formatDate(iso: string, locale: string): string {

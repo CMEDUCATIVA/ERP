@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import { getIntlLocale } from '@/shared/lib/formatters';
+import { formatCurrencyDisplay, getIntlLocale } from '@/shared/lib/formatters';
 
 /* ── Types ─────────────────────────────────────────────────────────────── */
 
@@ -53,16 +53,10 @@ function formatFull(amount: number, currency: string): string {
       maximumFractionDigits: 0,
     }).format(amount);
   }
-  try {
-    return new Intl.NumberFormat(getIntlLocale(), {
-      style: 'currency',
-      currency: code,
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(amount);
-  } catch {
-    return `${amount.toFixed(0)} ${code}`;
-  }
+  return formatCurrencyDisplay(amount, code, {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  });
 }
 
 function getBarColor(

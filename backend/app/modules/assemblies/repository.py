@@ -10,7 +10,7 @@ import uuid
 from sqlalchemy import String, delete, func, or_, select, update
 from sqlalchemy.exc import OperationalError, ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import noload, selectinload
+from sqlalchemy.orm import noload, selectinload, undefer
 
 from app.modules.assemblies.models import Assembly, AssemblyTemplate, Component
 
@@ -25,13 +25,21 @@ class AssemblyRepository:
 
     async def get_by_id(self, assembly_id: uuid.UUID) -> Assembly | None:
         """‌⁠‍Get assembly by ID without loading components (avoids MissingGreenlet)."""
-        stmt = select(Assembly).where(Assembly.id == assembly_id).options(noload(Assembly.components))
+        stmt = (
+            select(Assembly)
+            .where(Assembly.id == assembly_id)
+            .options(noload(Assembly.components), undefer(Assembly.component_count))
+        )
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
     async def get_by_id_with_components(self, assembly_id: uuid.UUID) -> Assembly | None:
         """Get assembly by ID with components eagerly loaded."""
-        stmt = select(Assembly).where(Assembly.id == assembly_id).options(selectinload(Assembly.components))
+        stmt = (
+            select(Assembly)
+            .where(Assembly.id == assembly_id)
+            .options(selectinload(Assembly.components), undefer(Assembly.component_count))
+        )
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
@@ -108,7 +116,12 @@ class AssemblyRepository:
         total = (await self.session.execute(count_stmt)).scalar_one()
 
         # Fetch - skip eager loading of components for list queries
-        stmt = base.options(noload(Assembly.components)).order_by(Assembly.code).offset(offset).limit(limit)
+        stmt = (
+            base.options(noload(Assembly.components), undefer(Assembly.component_count))
+            .order_by(Assembly.code)
+            .offset(offset)
+            .limit(limit)
+        )
         result = await self.session.execute(stmt)
         assemblies = list(result.scalars().all())
 

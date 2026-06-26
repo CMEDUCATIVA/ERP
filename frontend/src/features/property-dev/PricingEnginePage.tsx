@@ -112,6 +112,7 @@ import {
   type Reservation,
   type ReservationStatus,
 } from './api';
+import { formatCurrencyDisplay } from '@/shared/lib/formatters';
 
 const RULE_TYPES: PricingRuleType[] = [
   'early_bird',
@@ -175,15 +176,9 @@ const CURRENCY_OPTIONS: Array<{ code: string; label: string }> = [
 function fmtMoney(amount: string | number, currency: string): string {
   const n = typeof amount === 'string' ? Number(amount) : amount;
   if (!Number.isFinite(n)) return String(amount);
-  try {
-    return new Intl.NumberFormat(undefined, {
-      style: 'currency',
-      currency: currency || 'EUR',
-      maximumFractionDigits: 2,
-    }).format(n);
-  } catch {
-    return `${n.toFixed(2)} ${currency}`;
-  }
+  return formatCurrencyDisplay(n, currency || 'EUR', {
+    maximumFractionDigits: 2,
+  });
 }
 
 function statusBadge(status: PriceList['status']): JSX.Element {

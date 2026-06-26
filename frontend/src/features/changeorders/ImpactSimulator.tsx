@@ -28,7 +28,7 @@ import {
   History,
 } from 'lucide-react';
 import { Button, Card, Badge } from '@/shared/ui';
-import { getIntlLocale } from '@/shared/lib/formatters';
+import { formatCurrencyDisplay, getIntlLocale } from '@/shared/lib/formatters';
 import { useToastStore } from '@/stores/useToastStore';
 import {
   simulateImpact,
@@ -40,16 +40,8 @@ function fmtMoney(value: string, currency: string): string {
   const n = Number(value);
   if (!Number.isFinite(n)) return value;
   const code = (currency || '').trim().toUpperCase();
-  try {
-    if (code && /^[A-Z]{3}$/.test(code)) {
-      return new Intl.NumberFormat(getIntlLocale(), {
-        style: 'currency',
-        currency: code,
-        maximumFractionDigits: 0,
-      }).format(n);
-    }
-  } catch {
-    /* fall through to plain formatting */
+  if (code && /^[A-Z]{3}$/.test(code)) {
+    return formatCurrencyDisplay(n, code, { maximumFractionDigits: 0 });
   }
   return new Intl.NumberFormat(getIntlLocale(), {
     maximumFractionDigits: 0,

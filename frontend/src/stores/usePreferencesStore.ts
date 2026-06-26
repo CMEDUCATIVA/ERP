@@ -8,6 +8,7 @@
  */
 
 import { create } from 'zustand';
+import { formatCurrencyDisplay } from '@/shared/lib/formatters';
 
 const STORAGE_KEY = 'oe_preferences';
 
@@ -33,6 +34,8 @@ interface Preferences {
   defaultRegion: string;
   defaultCurrency: string;
   defaultStandard: string;
+  /** Custom assembly categories added by the user in Regional Settings. */
+  customAssemblyCategories: string[];
 }
 
 const DEFAULTS: Preferences = {
@@ -44,6 +47,7 @@ const DEFAULTS: Preferences = {
   defaultRegion: 'DACH',
   defaultCurrency: 'EUR',
   defaultStandard: 'din276',
+  customAssemblyCategories: [],
 };
 
 function readPreferences(): Preferences {
@@ -98,12 +102,11 @@ export const usePreferencesStore = create<PreferencesState>((set, get) => ({
     const { currency, numberLocale } = get();
     const safe = /^[A-Z]{3}$/.test(currency) ? currency : 'EUR';
     try {
-      return new Intl.NumberFormat(numberLocale, {
-        style: 'currency',
-        currency: safe,
+      return formatCurrencyDisplay(amount, safe, {
+        locale: numberLocale,
         minimumFractionDigits: 0,
         maximumFractionDigits: 2,
-      }).format(amount);
+      });
     } catch {
       return `${amount.toFixed(2)} ${safe}`;
     }

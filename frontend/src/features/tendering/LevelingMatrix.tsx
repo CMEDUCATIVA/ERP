@@ -29,7 +29,7 @@ import {
   SkeletonTable,
 } from '@/shared/ui';
 import { useToastStore } from '@/stores/useToastStore';
-import { getIntlLocale } from '@/shared/lib/formatters';
+import { formatCurrencyDisplay, getIntlLocale } from '@/shared/lib/formatters';
 import { getLevelingMatrix, levelBids } from './api';
 
 interface Props {
@@ -52,16 +52,10 @@ function formatCurrency(amount: number, currency?: string): string {
       maximumFractionDigits: 0,
     }).format(amount);
   }
-  try {
-    return new Intl.NumberFormat(getIntlLocale(), {
-      style: 'currency',
-      currency: code,
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(amount);
-  } catch {
-    return `${amount.toFixed(0)} ${code}`;
-  }
+  return formatCurrencyDisplay(amount, code, {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  });
 }
 
 function median(values: number[]): number {

@@ -54,7 +54,7 @@ import {
   type Recipient,
   type DistributeResponse,
 } from './api';
-import { getIntlLocale } from '@/shared/lib/formatters';
+import { formatCurrencyDisplay, getIntlLocale } from '@/shared/lib/formatters';
 import {
   listSubcontractors,
   type Subcontractor,
@@ -181,16 +181,10 @@ function formatCurrency(amount: number | string, currency?: string): string {
       maximumFractionDigits: 0,
     }).format(num);
   }
-  try {
-    return new Intl.NumberFormat(getIntlLocale(), {
-      style: 'currency',
-      currency: code,
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(num);
-  } catch {
-    return `${num.toFixed(0)} ${code}`;
-  }
+  return formatCurrencyDisplay(num, code, {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  });
 }
 
 function formatNumber(n: number, decimals: number = 2): string {

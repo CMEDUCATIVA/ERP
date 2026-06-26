@@ -6,7 +6,7 @@ import { apiGet, apiPost } from '@/shared/lib/api';
 import { useToastStore } from '@/stores/useToastStore';
 import { useProjectContextStore } from '@/stores/useProjectContextStore';
 import { useAuthStore } from '@/stores/useAuthStore';
-import { getIntlLocale } from '@/shared/lib/formatters';
+import { formatCurrencyDisplay, getIntlLocale } from '@/shared/lib/formatters';
 import { SUPPORTED_LANGUAGES } from '@/app/i18n';
 import { uploadDocument, fetchDocuments, type DocumentItem } from '@/features/documents/api';
 import {
@@ -774,12 +774,10 @@ function KpiRibbon({
     if (!Number.isFinite(value)) return `0 ${code}`;
     try {
       const compact = value >= 1_000;
-      return new Intl.NumberFormat(getIntlLocale(), {
-        style: 'currency',
-        currency: code,
-        notation: compact ? 'compact' : 'standard',
+      return formatCurrencyDisplay(value, code, {
+        compact,
         maximumFractionDigits: compact ? 1 : 2,
-      }).format(value);
+      });
     } catch {
       // Unknown currency code \u2014 fall back to raw number with code suffix.
       return `${value.toFixed(2)} ${code}`;

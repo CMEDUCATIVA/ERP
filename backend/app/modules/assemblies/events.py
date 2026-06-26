@@ -207,6 +207,8 @@ async def _on_catalog_resource_updated(event: Event) -> None:
       source of truth after a filtered bulk multiply).
     """
     data = event.data or {}
+    if data.get("components_synchronized"):
+        return
     raw_id = data.get("resource_id") or data.get("catalog_resource_id")
     # ``catalog.resources.updated`` (the name the catalog router
     # actually emits) ships the affected ids under ``resource_ids``.
@@ -292,7 +294,9 @@ def register_assemblies_subscribers() -> None:
     # propagated to assemblies. The singular names are kept as
     # additional subscriptions in case a single-edit publisher is added
     # later (the handler already understands the single-resource shape).
-    event_bus.subscribe("catalog.resources.updated", _on_catalog_resource_updated)
-    event_bus.subscribe("catalog.resource.updated", _on_catalog_resource_updated)
-    event_bus.subscribe("catalog.resource.price_adjusted", _on_catalog_resource_updated)
-    logger.info("Assemblies: subscribed to costs.item.updated + catalog.resources.updated (+ legacy singular names)")
+    # CAT-002 (disabled): components are now independent snapshots.
+    # Catalog changes must NOT update existing assemblies automatically.
+    # event_bus.subscribe("catalog.resources.updated", _on_catalog_resource_updated)
+    # event_bus.subscribe("catalog.resource.updated", _on_catalog_resource_updated)
+    # event_bus.subscribe("catalog.resource.price_adjusted", _on_catalog_resource_updated)
+    logger.info("Assemblies: subscribed to costs.item.updated (catalog sync disabled — independent snapshots)")

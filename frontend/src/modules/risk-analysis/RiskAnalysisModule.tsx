@@ -21,6 +21,7 @@ import {
   MoneyDisplay,
 } from '@/shared/ui';
 import { apiGet } from '@/shared/lib/api';
+import { formatCurrencyDisplay } from '@/shared/lib/formatters';
 import { useToastStore } from '@/stores/useToastStore';
 import { useProjectContextStore } from '@/stores/useProjectContextStore';
 import { usePreferencesStore } from '@/stores/usePreferencesStore';
@@ -54,17 +55,12 @@ function useCompactMoney(currency: string | undefined): (n: number) => string {
     (n: number): string => {
       const trimmed = typeof currency === 'string' ? currency.trim() : currency;
       if (!trimmed || !/^[A-Z]{3}$/.test(trimmed)) return '—';
-      try {
-        return new Intl.NumberFormat(numberLocale, {
-          style: 'currency',
-          currency: trimmed,
-          notation: 'compact',
-          minimumFractionDigits: 0,
-          maximumFractionDigits: 1,
-        }).format(n);
-      } catch {
-        return `${n.toFixed(0)} ${trimmed}`;
-      }
+      return formatCurrencyDisplay(n, trimmed, {
+        locale: numberLocale,
+        compact: true,
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 1,
+      });
     },
     [currency, numberLocale],
   );

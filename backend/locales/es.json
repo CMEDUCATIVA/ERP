@@ -167,6 +167,15 @@
     "role_admin_desc": "Full access to all features",
     "role_manager_desc": "Project and team management",
     "role_editor_desc": "Create and edit content",
-    "role_viewer_desc": "Read-only access"
+    "role_viewer_desc": "Acceso de solo lectura"
+  },
+  "catalog": {
+    "title": "Catálogo de Recursos",
+    "my_catalog": "Mi Base de Datos",
+    "tab_all": "Todos",
+    "tab_material": "Materiales",
+    "tab_equipment": "Equipos",
+    "tab_labor": "Mano de obra",
+    "tab_operator": "Operadores"
   }
 }

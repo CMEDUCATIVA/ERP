@@ -17,6 +17,7 @@ import { AlertCircle, Loader2 } from 'lucide-react';
 
 import { fetchContractTaxQuote } from './api';
 import type { ContractTaxQuote, TaxQuotePayload } from './api';
+import { formatCurrencyDisplay } from '@/shared/lib/formatters';
 
 interface Props {
   /** SalesContract.id to quote. */
@@ -118,15 +119,9 @@ const VAT_RATE_CLASSES: Array<{ code: string; label: string }> = [
 function formatMoney(value: string | number, currency: string): string {
   const n = typeof value === 'string' ? parseFloat(value) : value;
   if (!Number.isFinite(n)) return String(value);
-  try {
-    return new Intl.NumberFormat(undefined, {
-      style: 'currency',
-      currency: currency || 'USD',
-      maximumFractionDigits: 2,
-    }).format(n);
-  } catch {
-    return n.toLocaleString(undefined, { maximumFractionDigits: 2 });
-  }
+  return formatCurrencyDisplay(n, currency || 'USD', {
+    maximumFractionDigits: 2,
+  });
 }
 
 export function TaxQuotePanel({

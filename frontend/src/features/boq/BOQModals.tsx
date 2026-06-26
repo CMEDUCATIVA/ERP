@@ -26,7 +26,7 @@ import {
 } from 'lucide-react';
 import { Button, Badge, CountryFlag } from '@/shared/ui';
 import { apiGet, apiPost } from '@/shared/lib/api';
-import { getIntlLocale } from '@/shared/lib/formatters';
+import { formatCurrencyDisplay, getIntlLocale } from '@/shared/lib/formatters';
 import { useToastStore } from '@/stores/useToastStore';
 import { REGION_MAP } from '@/stores/useCostDatabaseStore';
 import { VariantPicker } from '@/features/costs/VariantPicker';
@@ -2117,12 +2117,11 @@ export function CostDatabaseSearchModal({
                       'Catalog-rate × quantity for the selection. Variant picks may adjust this.',
                   })}
                 >
-                  ≈ {new Intl.NumberFormat(getIntlLocale(), {
-                    style: 'currency',
-                    currency: selectionPreview.currency,
+                  ≈ {formatCurrencyDisplay(selectionPreview.total, selectionPreview.currency, {
+                    locale: getIntlLocale(),
                     minimumFractionDigits: 0,
                     maximumFractionDigits: 0,
-                  }).format(selectionPreview.total)}
+                  })}
                 </span>
               </>
             )}

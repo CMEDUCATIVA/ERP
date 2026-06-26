@@ -28,15 +28,18 @@ import {
   House,
   TrendingUp,
   AlertTriangle,
+  Pencil,
   type LucideIcon,
 } from 'lucide-react';
 import { Button, Card, Badge, ConfirmDialog, EmptyState, Skeleton, DismissibleInfo, IntroRichText, CountryFlag, CountryFlagBackdrop, Breadcrumb, ModuleGuideButton } from '@/shared/ui';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { catalogGuide } from './catalogGuide';
+import { CategoryCombobox } from './CategoryCombobox';
 import { useConfirm } from '@/shared/hooks/useConfirm';
-import { apiGet, apiPost, apiPatch, apiDelete } from '@/shared/lib/api';
+import { apiGet, apiPost, apiPatch, apiPut, apiDelete } from '@/shared/lib/api';
 import { getIntlLocale } from '@/shared/lib/formatters';
 import { useToastStore } from '@/stores/useToastStore';
+import { usePreferencesStore } from '@/stores/usePreferencesStore';
 import { REGION_MAP } from '@/stores/useCostDatabaseStore';
 import {
   assembliesApi,
@@ -108,11 +111,36 @@ interface SelectedResourceEntry {
 /* ── Constants ─────────────────────────────────────────────────────────── */
 
 const PAGE_SIZE = 20;
+const CUSTOM_CATEGORIES_STORAGE_KEY = 'oce.catalog.customCategories';
 
 interface TypeTabConfig {
   key: string;
   label: string;
   icon: LucideIcon;
+}
+
+function readStoredCustomCategories(): string[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.localStorage.getItem(CUSTOM_CATEGORIES_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((value) => String(value).trim())
+      .filter((value, index, arr) => value && arr.indexOf(value) === index);
+  } catch {
+    return [];
+  }
+}
+
+function writeStoredCustomCategories(categories: string[]) {
+  if (typeof window === 'undefined') return;
+  const clean = categories
+    .map((value) => value.trim())
+    .filter((value, index, arr) => value && arr.indexOf(value) === index)
+    .sort((a, b) => a.localeCompare(b));
+  window.localStorage.setItem(CUSTOM_CATEGORIES_STORAGE_KEY, JSON.stringify(clean));
 }
 
 const TYPE_TABS: TypeTabConfig[] = [
@@ -123,7 +151,10 @@ const TYPE_TABS: TypeTabConfig[] = [
   { key: 'operator', label: 'Operators', icon: HardHat },
 ];
 
-const UNITS = ['', 'm', 'm2', 'm3', 'kg', 't', 'h', 'pcs', 'lsum', 'set', 'lm'] as const;
+import { getUnitLabel, getAllUnitKeys } from '@/features/boq/boqHelpers';
+import { unitSymbol } from '@/shared/lib/unitDefinitions';
+
+const UNIT_KEYS = getAllUnitKeys();
 
 interface CWICRRegionInfo {
   id: string;
@@ -632,6 +663,9 @@ function ResourceRow({
   onToggle,
   onSelect,
   onCopy,
+  onEdit,
+  onDelete,
+  onCopyToMine,
   copiedId,
   t: translate,
 }: {
@@ -641,6 +675,9 @@ function ResourceRow({
   onToggle: () => void;
   onSelect: () => void;
   onCopy: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+  onCopyToMine: () => void;
   copiedId: string | null;
   t: ReturnType<typeof useTranslation>['t'];
 }) {
@@ -701,6 +738,24 @@ function ResourceRow({
               ) : null}
             </div>
           ) : null}
+          {resource.resource_type === 'material' && typeof resource.specifications?.waste_pct === 'number' && resource.specifications.waste_pct > 0 && (
+            <div className="mt-0.5">
+              <span className="inline-flex items-center gap-0.5 rounded bg-amber-50 dark:bg-amber-900/10 px-1 text-2xs text-amber-600 dark:text-amber-400">
+                Desp: {resource.specifications.waste_pct}%
+              </span>
+            </div>
+          )}
+          {(resource.resource_type === 'labor' || resource.resource_type === 'operator') && (
+            <div className="mt-0.5">
+              <span className="inline-flex items-center gap-0.5 rounded bg-green-50 dark:bg-green-900/10 px-1 text-2xs text-green-600 dark:text-green-400">
+                {resource.specifications?.labor_role
+                  ? `${String(resource.specifications.labor_role).charAt(0).toUpperCase() + String(resource.specifications.labor_role).slice(1)}`
+                  : getResourceTypeLabel(resource.resource_type, translate)}
+                {resource.specifications?.daily_wage ? ` S/ ${Number(resource.specifications.daily_wage).toFixed(2)}/día` : ''}
+                {resource.specifications?.burden_pct ? ` · +${Number(resource.specifications.burden_pct)}% ben.` : ''}
+              </span>
+            </div>
+          )}
         </td>
 
         {/* Code */}
@@ -713,17 +768,26 @@ function ResourceRow({
         {/* Category */}
         <td className="px-3 py-3 max-w-[120px]">
           <span
-            className={`inline-block truncate max-w-full rounded px-1.5 py-0.5 text-2xs font-medium ${
-              typeColors[resource.resource_type] || 'bg-surface-secondary text-content-secondary'
-            }`}
+            className="inline-block truncate max-w-full rounded px-1.5 py-0.5 text-2xs font-medium bg-surface-secondary text-content-secondary"
             title={resource.category}
           >
             {translate(`catalog.category_${resource.category.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`, { defaultValue: resource.category })}
           </span>
         </td>
 
+        {/* Type */}
+        <td className="px-3 py-3">
+          <span
+            className={`inline-flex rounded px-1.5 py-0.5 text-2xs font-medium ${
+              typeColors[resource.resource_type] || 'bg-surface-secondary text-content-secondary'
+            }`}
+          >
+            {getResourceTypeLabel(resource.resource_type, translate)}
+          </span>
+        </td>
+
         {/* Unit */}
-        <td className="px-4 py-3 text-center text-xs text-content-secondary">{resource.unit}</td>
+        <td className="px-4 py-3 text-center text-xs text-content-secondary" title={getUnitLabel(resource.unit, translate)}>{unitSymbol(resource.unit)}</td>
 
         {/* Price (avg) */}
         <td className="px-3 py-3 text-right text-xs font-semibold text-content-primary tabular-nums whitespace-nowrap">
@@ -759,6 +823,17 @@ function ResourceRow({
         <td className="px-2 py-3">
           <div className="flex items-center gap-1">
             <button
+              className="flex h-7 w-7 items-center justify-center rounded-md text-content-tertiary hover:bg-oe-blue-subtle hover:text-oe-blue transition-colors"
+              onClick={(e) => {
+                e.stopPropagation();
+                onEdit();
+              }}
+              aria-label={translate('catalog.edit_resource', { defaultValue: 'Edit resource' })}
+              title={translate('catalog.edit_resource', { defaultValue: 'Edit resource' })}
+            >
+              <Pencil size={14} />
+            </button>
+            <button
               className="flex h-7 w-7 items-center justify-center rounded-md text-content-tertiary hover:bg-surface-secondary hover:text-content-primary transition-colors"
               onClick={(e) => {
                 e.stopPropagation();
@@ -790,8 +865,16 @@ function ResourceRow({
       {/* Expanded details */}
       {isExpanded && (
         <tr>
-          <td colSpan={9} className="p-0">
-            <ResourceDetailPanel resource={resource} regionInfo={regionInfo ?? undefined} fmt={fmt} translate={translate} />
+          <td colSpan={10} className="p-0">
+            <ResourceDetailPanel
+              resource={resource}
+              regionInfo={regionInfo ?? undefined}
+              fmt={fmt}
+              translate={translate}
+              onEdit={onEdit}
+              onDelete={onDelete}
+              onCopyToMine={onCopyToMine}
+            />
           </td>
         </tr>
       )}
@@ -806,13 +889,21 @@ function ResourceDetailPanel({
   regionInfo,
   fmt,
   translate: t,
+  onEdit,
+  onDelete,
+  onCopyToMine,
 }: {
   resource: CatalogResource;
   regionInfo: { name: string; flag: string; currency: string } | undefined;
   fmt: (n: number) => string;
   translate: (key: string, opts?: Record<string, string>) => string;
+  onEdit: () => void;
+  onDelete: () => void;
+  onCopyToMine: () => void;
 }) {
   const specs = resource.specifications || {};
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [previewImg, setPreviewImg] = useState<string | null>(null);
   const minPrice = Number(resource.min_price);
   const basePrice = Number(resource.base_price);
   const maxPrice = Number(resource.max_price);
@@ -878,22 +969,88 @@ function ResourceDetailPanel({
           </div>
         </div>
 
+        <div className="-mt-10 mb-3 flex justify-end gap-2">
+          {resource.region !== 'CUSTOM' && resource.source !== 'manual' && (
+            <Button variant="secondary" size="sm" icon={<House size={13} />} onClick={onCopyToMine}>
+              {t('catalog.copy_to_mine', { defaultValue: 'Add to My Database' })}
+            </Button>
+          )}
+          <Button variant="secondary" size="sm" icon={<Trash2 size={13} />} onClick={() => setShowDeleteConfirm(true)}>
+            {t('common.delete', { defaultValue: 'Delete' })}
+          </Button>
+          <Button variant="secondary" size="sm" icon={<Pencil size={13} />} onClick={onEdit}>
+            {t('common.edit', { defaultValue: 'Edit' })}
+          </Button>
+        </div>
+
+        {/* Delete confirmation */}
+        {showDeleteConfirm && (
+          <div className="mb-4 rounded-xl border border-semantic-error/20 bg-semantic-error/5 px-4 py-3 flex items-center justify-between">
+            <div>
+              <p className="text-xs font-medium text-content-primary">
+                {t('catalog.delete_confirm_title', { defaultValue: 'Delete this resource?' })}
+              </p>
+              <p className="text-2xs text-content-secondary mt-0.5">
+                {t('catalog.delete_confirm_desc', { defaultValue: 'This cannot be undone. Linked cost items will lose the reference.' })}
+              </p>
+            </div>
+            <div className="flex gap-2 shrink-0">
+              <Button variant="secondary" size="sm" onClick={() => setShowDeleteConfirm(false)}>
+                {t('common.cancel', { defaultValue: 'Cancel' })}
+              </Button>
+              <Button variant="danger" size="sm" onClick={() => { setShowDeleteConfirm(false); onDelete(); }}>
+                {t('common.delete_confirm', { defaultValue: 'Delete' })}
+              </Button>
+            </div>
+          </div>
+        )}
+
         {/* Top row: Price cards + Identity */}
         <div className="flex gap-4 mb-4">
           {/* Price cards */}
           <div className="flex gap-2 shrink-0">
-            <div className="rounded-lg bg-green-50 dark:bg-green-500/10 border border-green-200/50 dark:border-green-500/20 px-3 py-2 text-center min-w-[80px]">
+            <div className="rounded-lg bg-green-50 dark:bg-green-500/10 border border-green-200/50 dark:border-green-500/20 px-3 py-2 text-center min-w-[80px]" title="Precio mínimo">
               <div className="text-2xs text-green-600 dark:text-green-400 font-medium mb-0.5">{t('common.min', { defaultValue: 'Min' })}</div>
               <div className="text-sm font-bold text-green-700 dark:text-green-300 tabular-nums">{fmt(minPrice)}</div>
             </div>
-            <div className="rounded-lg bg-amber-50 dark:bg-amber-500/10 border border-amber-200/50 dark:border-amber-500/20 px-3 py-2 text-center min-w-[80px]">
+            <div className="rounded-lg bg-amber-50 dark:bg-amber-500/10 border border-amber-200/50 dark:border-amber-500/20 px-3 py-2 text-center min-w-[80px]" title="Precio promedio">
               <div className="text-2xs text-amber-600 dark:text-amber-400 font-medium mb-0.5">{t('common.avg', { defaultValue: 'Avg' })}</div>
               <div className="text-sm font-bold text-amber-700 dark:text-amber-300 tabular-nums">{fmt(basePrice)}</div>
             </div>
-            <div className="rounded-lg bg-red-50 dark:bg-red-500/10 border border-red-200/50 dark:border-red-500/20 px-3 py-2 text-center min-w-[80px]">
+            <div className="rounded-lg bg-red-50 dark:bg-red-500/10 border border-red-200/50 dark:border-red-500/20 px-3 py-2 text-center min-w-[80px]" title="Precio máximo">
               <div className="text-2xs text-red-600 dark:text-red-400 font-medium mb-0.5">{t('common.max', { defaultValue: 'Max' })}</div>
               <div className="text-sm font-bold text-red-700 dark:text-red-300 tabular-nums">{fmt(maxPrice)}</div>
             </div>
+            {typeof specs.waste_pct === 'number' && specs.waste_pct > 0 && (
+              <div className="rounded-lg bg-amber-50 dark:bg-amber-500/10 border border-amber-200/50 dark:border-amber-500/20 px-3 py-2 text-center min-w-[80px]" title="% Desperdicio de material">
+                <div className="text-2xs text-amber-600 dark:text-amber-400 font-medium mb-0.5">Desp</div>
+                <div className="text-sm font-bold text-amber-700 dark:text-amber-300 tabular-nums">{specs.waste_pct}%</div>
+              </div>
+            )}
+            {resource.resource_type === 'equipment' && typeof specs.fuel_cost_per_hour === 'number' && specs.fuel_cost_per_hour > 0 && (
+              <div className="rounded-lg bg-blue-50 dark:bg-blue-500/10 border border-blue-200/50 dark:border-blue-500/20 px-3 py-2 text-center min-w-[80px]" title="Combustible / hora (S/)">
+                <div className="text-2xs text-blue-600 dark:text-blue-400 font-medium mb-0.5">Comb/h</div>
+                <div className="text-sm font-bold text-blue-700 dark:text-blue-300 tabular-nums">{Number(specs.fuel_cost_per_hour).toFixed(2)}</div>
+              </div>
+            )}
+            {resource.resource_type === 'equipment' && typeof specs.acquisition_value === 'number' && specs.acquisition_value > 0 && (
+              <div className="rounded-lg bg-violet-50 dark:bg-violet-500/10 border border-violet-200/50 dark:border-violet-500/20 px-3 py-2 text-center min-w-[90px]" title="Valor de adquisición (S/)">
+                <div className="text-2xs text-violet-600 dark:text-violet-400 font-medium mb-0.5">Adq.</div>
+                <div className="text-sm font-bold text-violet-700 dark:text-violet-300 tabular-nums">{Number(specs.acquisition_value).toLocaleString()}</div>
+              </div>
+            )}
+            {resource.resource_type === 'equipment' && typeof specs.useful_life_years === 'number' && specs.useful_life_years > 0 && (
+              <div className="rounded-lg bg-teal-50 dark:bg-teal-500/10 border border-teal-200/50 dark:border-teal-500/20 px-3 py-2 text-center min-w-[80px]" title="Vida útil (años)">
+                <div className="text-2xs text-teal-600 dark:text-teal-400 font-medium mb-0.5">Vida util</div>
+                <div className="text-sm font-bold text-teal-700 dark:text-teal-300 tabular-nums">{specs.useful_life_years}a</div>
+              </div>
+            )}
+            {resource.resource_type === 'equipment' && typeof specs.maintenance_pct === 'number' && specs.maintenance_pct > 0 && (
+              <div className="rounded-lg bg-orange-50 dark:bg-orange-500/10 border border-orange-200/50 dark:border-orange-500/20 px-3 py-2 text-center min-w-[80px]" title="Mantenimiento anual (%)">
+                <div className="text-2xs text-orange-600 dark:text-orange-400 font-medium mb-0.5">Mant.</div>
+                <div className="text-sm font-bold text-orange-700 dark:text-orange-300 tabular-nums">{specs.maintenance_pct}%</div>
+              </div>
+            )}
           </div>
 
           {/* Price spread bar */}
@@ -913,14 +1070,69 @@ function ResourceDetailPanel({
           </div>
         </div>
 
+        {/* Specifications description */}
+        {typeof specs.description === 'string' && specs.description.trim() && (
+          <div className="mb-4 rounded-lg border border-border-light bg-surface-primary px-3 py-2.5">
+            <div className="text-2xs text-content-quaternary uppercase tracking-wider mb-1">
+              {t('catalog.specifications', { defaultValue: 'Specifications' })}
+            </div>
+            <p className="text-xs text-content-secondary leading-relaxed whitespace-pre-wrap break-words">
+              {specs.description as string}
+            </p>
+          </div>
+        )}
+
+        {/* Images */}
+        {Array.isArray(specs.images) && (specs.images as { name: string; dataUrl: string }[]).length > 0 && (
+          <div className="mb-4">
+            <div className="text-2xs text-content-quaternary uppercase tracking-wider mb-1">Imágenes</div>
+            <div className="flex flex-wrap gap-2">
+              {(specs.images as { name: string; dataUrl: string }[]).map((img, i) => (
+                <img key={i} src={img.dataUrl} alt={img.name} className="h-20 w-20 rounded-lg border border-border object-cover cursor-pointer hover:opacity-80 transition-opacity"
+                  onClick={() => setPreviewImg(img.dataUrl)} title={img.name}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Datasheets */}
+        {Array.isArray(specs.datasheets) && (specs.datasheets as { name: string; dataUrl: string }[]).length > 0 && (
+          <div className="mb-4">
+            <div className="text-2xs text-content-quaternary uppercase tracking-wider mb-1">Fichas técnicas</div>
+            <div className="flex flex-wrap gap-2">
+              {(specs.datasheets as { name: string; dataUrl: string }[]).map((ds, i) => (
+                <a key={i} href={ds.dataUrl} download={ds.name}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-primary px-3 py-1.5 text-xs text-content-secondary hover:text-oe-blue hover:border-oe-blue/30 transition-colors">
+                  <span className="max-w-[160px] truncate">{ds.name}</span>
+                </a>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Info grid */}
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-          {/* Type + Category */}
           <div className="rounded-lg bg-surface-primary border border-border-light p-2.5">
             <div className="text-2xs text-content-quaternary uppercase tracking-wider mb-1">{t('catalog.type_label', { defaultValue: 'Type' })}</div>
             <div className="text-xs font-medium text-content-primary">{getResourceTypeLabel(resource.resource_type, t)}</div>
             <div className="text-2xs text-content-tertiary mt-0.5">{categoryLabel}</div>
           </div>
+
+          {/* Labor info card */}
+          {(resource.resource_type === 'labor' || resource.resource_type === 'operator') && (
+            <div className="rounded-lg bg-surface-primary border border-border-light p-2.5">
+              <div className="text-2xs text-content-quaternary uppercase tracking-wider mb-1">Mano de obra</div>
+              <div className="text-xs font-medium text-content-primary">
+                {(specs.labor_role as string) || getResourceTypeLabel(resource.resource_type, t)}
+              </div>
+              <div className="text-2xs text-content-tertiary mt-0.5">
+                {specs.daily_wage ? `S/ ${Number(specs.daily_wage).toFixed(2)}/día` : ''}
+                {specs.burden_pct ? ` · +${Number(specs.burden_pct)}% benef.` : ''}
+                {!specs.daily_wage && !specs.burden_pct ? 'Sin datos laborales' : ''}
+              </div>
+            </div>
+          )}
 
           {/* Usage */}
           <div className="rounded-lg bg-surface-primary border border-border-light p-2.5">
@@ -979,16 +1191,23 @@ function ResourceDetailPanel({
           </div>
         )}
 
-        {/* Additional specs (collapsed by default) */}
-        {Object.keys(specs).length > 4 && (
-          <details className="mt-3">
-            <summary className="text-2xs font-medium text-content-tertiary cursor-pointer hover:text-content-secondary select-none">
-              {t('catalog.all_properties', { defaultValue: 'All properties' })} ({Object.keys(specs).length})
-            </summary>
-            <div className="mt-2 grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1 text-2xs">
-              {Object.entries(specs)
-                .filter(([, v]) => v && String(v).trim() !== '')
-                .map(([k, v]) => (
+        {/* Additional specs (collapsed by default) — badge fields already visible above are excluded */}
+        {(() => {
+          const BADGE_KEYS = new Set([
+            'waste_pct', 'labor_role', 'daily_wage', 'burden_pct',
+            'fuel_cost_per_hour', 'acquisition_value', 'useful_life_years', 'maintenance_pct',
+          ]);
+          const remaining = Object.entries(specs).filter(
+            ([k, v]) => !BADGE_KEYS.has(k) && v && String(v).trim() !== ''
+          );
+          if (remaining.length === 0) return null;
+          return (
+            <details className="mt-3">
+              <summary className="text-2xs font-medium text-content-tertiary cursor-pointer hover:text-content-secondary select-none">
+                {t('catalog.all_properties', { defaultValue: 'All properties' })} ({remaining.length})
+              </summary>
+              <div className="mt-2 grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1 text-2xs">
+                {remaining.map(([k, v]) => (
                   <div key={k} className="flex justify-between gap-2 py-0.5">
                     <span className="text-content-quaternary capitalize">{k.replace(/_/g, ' ').replace('parent ', '')}</span>
                     <span className="text-content-secondary truncate max-w-[150px] text-right" title={String(v)}>
@@ -996,10 +1215,26 @@ function ResourceDetailPanel({
                     </span>
                   </div>
                 ))}
-            </div>
-          </details>
-        )}
+              </div>
+            </details>
+          );
+        })()}
       </div>
+
+      {/* Image preview modal */}
+      {previewImg && createPortal(
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 animate-fade-in p-6" onClick={() => setPreviewImg(null)}>
+          <div className="relative max-h-[90vh] max-w-[95vw] sm:max-w-[800px] rounded-xl shadow-2xl overflow-hidden animate-scale-in" onClick={(e) => e.stopPropagation()}>
+            <button onClick={() => setPreviewImg(null)}
+              className="absolute top-2 right-2 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-black/40 text-white hover:bg-black/60 transition-colors"
+              aria-label="Cerrar">
+              <X size={14} />
+            </button>
+            <img src={previewImg} alt="Preview" className="block w-auto h-auto max-h-[90vh] max-w-[95vw] object-scale-down" />
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   );
 }
@@ -1203,9 +1438,9 @@ function BuildAssemblyModal({
                 aria-label={t('boq.unit', { defaultValue: 'Unit' })}
                 className="h-10 w-full appearance-none rounded-lg border border-border bg-surface-primary px-3 text-sm text-content-primary focus:outline-none focus:ring-2 focus:ring-oe-blue focus:border-transparent"
               >
-                {['m', 'm2', 'm3', 'kg', 't', 'pcs', 'lsum', 'h', 'set', 'lm'].map((u) => (
+                {UNIT_KEYS.map((u) => (
                   <option key={u} value={u}>
-                    {u}
+                    {unitSymbol(u)} ({getUnitLabel(u, t)})
                   </option>
                 ))}
               </select>
@@ -1431,8 +1666,10 @@ export function CatalogPage() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const copyCounterRef = useRef(0);
   const [showImportGrid, setShowImportGrid] = useState(false);
   const [showCreateResource, setShowCreateResource] = useState(false);
+  const [editingResource, setEditingResource] = useState<CatalogResource | null>(null);
   const [showBuildAssembly, setShowBuildAssembly] = useState(false);
   const [showPriceAdjust, setShowPriceAdjust] = useState(false);
   const { confirm, ...confirmProps } = useConfirm();
@@ -1501,8 +1738,14 @@ export function CatalogPage() {
   );
   const totalCount = stats?.total ?? 0;
 
-  // Categories for dropdown
-  const categories = (stats?.by_category ?? []).map((c) => c.category);
+  // Categories for dropdown. Keep the active category visible while the
+  // region-scoped stats refetch after creating a CUSTOM resource.
+  const categories = Array.from(
+    new Set([
+      ...(stats?.by_category ?? []).map((c) => c.category),
+      ...(category ? [category] : []),
+    ]),
+  );
 
   // Loaded region IDs
   const loadedRegionIds = new Set((regionStats ?? []).map((r) => r.region));
@@ -1547,6 +1790,65 @@ export function CatalogPage() {
       // Clipboard API unavailable -- silently ignore.
     }
   }, []);
+
+  const handleDeleteResource = useCallback(async (resource: CatalogResource) => {
+    try {
+      await apiDelete(`/v1/catalog/${resource.id}`);
+      setExpandedId(null);
+      queryClient.invalidateQueries({ queryKey: ['catalog'] });
+      addToast({
+        type: 'success',
+        title: t('catalog.resource_deleted', { defaultValue: 'Resource deleted' }),
+        message: resource.name,
+      });
+    } catch (err) {
+      addToast({
+        type: 'error',
+        title: t('common.error'),
+        message: err instanceof Error ? err.message : 'Failed to delete resource',
+      });
+    }
+  }, [addToast, t, queryClient]);
+
+  const handleCopyToMine = useCallback(async (resource: CatalogResource) => {
+    try {
+      const typePrefix = resource.resource_type.slice(0,3).toUpperCase();
+      const maxNum = items
+        .filter(i => i.source === 'manual' && (i.resource_code ?? '').startsWith(`CAT-${typePrefix}-`))
+        .reduce((max, i) => {
+          const num = parseInt(((i.resource_code ?? '').split('-').pop() ?? '0'), 10);
+          return Number.isFinite(num) && num > max ? num : max;
+        }, 0);
+      copyCounterRef.current += 1;
+      const code = `CAT-${typePrefix}-${String(maxNum + copyCounterRef.current).padStart(6, '0')}`;
+      await apiPost('/v1/catalog/', {
+        resource_code: code,
+        name: resource.name,
+        resource_type: resource.resource_type,
+        category: resource.category,
+        unit: resource.unit,
+        base_price: Number(resource.base_price) || 0,
+        min_price: Number(resource.min_price) || 0,
+        max_price: Number(resource.max_price) || 0,
+        currency: resource.currency,
+        source: 'manual',
+        region: 'CUSTOM',
+        specifications: resource.specifications,
+      });
+      queryClient.invalidateQueries({ queryKey: ['catalog'] });
+      addToast({
+        type: 'success',
+        title: t('catalog.copied_to_mine', { defaultValue: 'Added to My Database' }),
+        message: resource.name,
+      });
+    } catch (err) {
+      addToast({
+        type: 'error',
+        title: t('common.error'),
+        message: err instanceof Error ? err.message : 'Failed to copy resource',
+      });
+    }
+  }, [addToast, t, queryClient]);
 
   const toggleSelect = useCallback((id: string) => {
     setSelectedIds((prev) => {
@@ -1863,9 +2165,9 @@ export function CatalogPage() {
               <option value="">
                 {t('catalog.all_units', { defaultValue: 'All units' })}
               </option>
-              {UNITS.filter(Boolean).map((u) => (
+              {UNIT_KEYS.map((u) => (
                 <option key={u} value={u}>
-                  {u}
+                  {unitSymbol(u)} ({getUnitLabel(u, t)})
                 </option>
               ))}
             </select>
@@ -2062,6 +2364,9 @@ export function CatalogPage() {
                     <th className="px-3 py-3 font-medium text-content-secondary w-28">
                       {t('catalog.category', { defaultValue: 'Category' })}
                     </th>
+                    <th className="px-3 py-3 font-medium text-content-secondary w-20">
+                      {t('catalog.type_label', { defaultValue: 'Type' })}
+                    </th>
                     <th className="px-4 py-3 font-medium text-content-secondary w-16 text-center">
                       {t('boq.unit', { defaultValue: 'Unit' })}
                     </th>
@@ -2074,7 +2379,7 @@ export function CatalogPage() {
                     <th className="px-4 py-3 font-medium text-content-secondary w-16 text-center">
                       {t('catalog.usage', { defaultValue: 'Usage' })}
                     </th>
-                    <th className="px-2 py-3 w-16" />
+                    <th className="px-2 py-3 w-24" />
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border-light">
@@ -2089,6 +2394,9 @@ export function CatalogPage() {
                         onToggle={() => setExpandedId(isExpanded ? null : resource.id)}
                         onSelect={() => toggleSelect(resource.id)}
                         onCopy={() => handleCopyRate(resource)}
+                        onEdit={() => setEditingResource(resource)}
+                        onDelete={() => handleDeleteResource(resource)}
+                        onCopyToMine={() => handleCopyToMine(resource)}
                         copiedId={copiedId}
                         t={t}
                       />
@@ -2249,10 +2557,27 @@ export function CatalogPage() {
       )}
 
       {showCreateResource && (
-        <CreateResourceModal
+        <ResourceFormModal
           onClose={() => setShowCreateResource(false)}
-          onCreated={() => {
+          onSaved={(saved) => {
             setShowCreateResource(false);
+            if (saved?.region) {
+              setRegion(saved.region);
+              setCategory(saved.category);
+              setOffset(0);
+            }
+            invalidateAll();
+          }}
+          customCount={items.filter(i => i.source === 'manual').length}
+        />
+      )}
+
+      {editingResource && (
+        <ResourceFormModal
+          resource={editingResource}
+          onClose={() => setEditingResource(null)}
+          onSaved={() => {
+            setEditingResource(null);
             invalidateAll();
           }}
         />
@@ -2720,57 +3045,287 @@ function PriceAdjustModal({
 
 /* ── Create Resource Modal ───────────────────────────────────────────── */
 
-function CreateResourceModal({
+function ResourceFormModal({
+  resource,
   onClose,
-  onCreated,
+  onSaved,
+  customCount,
 }: {
+  resource?: CatalogResource;
   onClose: () => void;
-  onCreated: () => void;
+  onSaved: (saved?: { category: string; region: string }) => void;
+  customCount?: number;
 }) {
   const { t } = useTranslation();
   const addToast = useToastStore((s) => s.addToast);
-  const [submitting, setSubmitting] = useState(false);
-  const [form, setForm] = useState({
-    name: '',
-    resource_type: 'material',
-    category: '',
-    unit: 'm2',
-    base_price: '',
-    currency: 'EUR',
+  const rawPreferredCurrency = usePreferencesStore((s) => s.currency);
+  const setPreference = usePreferencesStore((s) => s.setPreference);
+  const { data: userPrefs } = useQuery({
+    queryKey: ['user-preferences'],
+    queryFn: () => apiGet<{ currency_code?: string | null }>('/v1/users/me/preferences/'),
+    retry: false,
+    staleTime: 60_000,
   });
+  const serverPreferredCurrency = (userPrefs?.currency_code ?? '').trim().toUpperCase();
+  const preferredCurrencySource = serverPreferredCurrency || rawPreferredCurrency;
+  const preferredCurrency = /^[A-Z]{3}$/.test(preferredCurrencySource) ? preferredCurrencySource : 'EUR';
+  const [submitting, setSubmitting] = useState(false);
+  const isEditing = Boolean(resource);
+  const [form, setForm] = useState(() => ({
+    name: resource?.name ?? '',
+    resource_type: resource?.resource_type ?? 'material',
+    category: resource?.category ?? '',
+    unit: resource?.unit ?? 'm2',
+    base_price: resource?.base_price ?? '',
+    min_price: resource?.min_price ?? '',
+    max_price: resource?.max_price ?? '',
+    currency: resource?.currency ?? preferredCurrency,
+    specifications: (resource?.specifications as Record<string, unknown> | null)?.description as string ?? '',
+  }));
 
-  const TYPES = ['material', 'equipment', 'labor', 'operator'];
-  // Construction units - LATAM: hh=man-hour, hm=machine-hour, und=unit, bls=bag, pza=piece, pto=point, gbl=global
-  const UNITS = ['m', 'm2', 'm3', 'kg', 't', 'pcs', 'und', 'lsum', 'hh', 'hm', 'h', 'day', 'month', 'set', 'l', 'gal', 'bls', 'pza', 'pto', 'gbl', 'kWh'];
+  useEffect(() => {
+    if (/^[A-Z]{3}$/.test(serverPreferredCurrency) && serverPreferredCurrency !== rawPreferredCurrency) {
+      setPreference('currency', serverPreferredCurrency);
+      setPreference('defaultCurrency', serverPreferredCurrency);
+    }
+  }, [rawPreferredCurrency, serverPreferredCurrency, setPreference]);
+
+  useEffect(() => {
+    if (resource) return;
+    setForm((prev) => {
+      if (prev.currency === preferredCurrency) return prev;
+      if (prev.currency !== rawPreferredCurrency && prev.currency !== 'EUR') return prev;
+      return { ...prev, currency: preferredCurrency };
+    });
+  }, [preferredCurrency, rawPreferredCurrency, resource]);
+  const specsObj = (resource?.specifications ?? {}) as Record<string, unknown>;
+  const [images, setImages] = useState<{ name: string; dataUrl: string }[]>(
+    (specsObj.images as { name: string; dataUrl: string }[]) ?? []
+  );
+  const [datasheets, setDatasheets] = useState<{ name: string; dataUrl: string }[]>(
+    (specsObj.datasheets as { name: string; dataUrl: string }[]) ?? []
+  );
+  const [wastePct, setWastePct] = useState<number>(
+    (specsObj.waste_pct as number) ?? '' as unknown as number
+  );
+  const [laborRole, setLaborRole] = useState<string>(
+    (specsObj.labor_role as string) ?? ''
+  );
+  const [dailyWage, setDailyWage] = useState<number>(
+    (specsObj.daily_wage as number) ?? '' as unknown as number
+  );
+  const [burdenPct, setBurdenPct] = useState<number>(
+    (specsObj.burden_pct as number) ?? '' as unknown as number
+  );
+  const [fuelCostPerHour, setFuelCostPerHour] = useState<number>(
+    (specsObj.fuel_cost_per_hour as number) ?? '' as unknown as number
+  );
+  const [acquisitionValue, setAcquisitionValue] = useState<number>(
+    (specsObj.acquisition_value as number) ?? '' as unknown as number
+  );
+  const [usefulLifeYears, setUsefulLifeYears] = useState<number>(
+    (specsObj.useful_life_years as number) ?? '' as unknown as number
+  );
+  const [maintenancePct, setMaintenancePct] = useState<number>(
+    (specsObj.maintenance_pct as number) ?? '' as unknown as number
+  );
+  const [currencyQuery, setCurrencyQuery] = useState('');
+  const [currencyOpen, setCurrencyOpen] = useState(false);
+  const currencyRef = useRef<HTMLDivElement>(null);
+  const currencyInputRef = useRef<HTMLInputElement>(null);
+  const [unitQuery, setUnitQuery] = useState('');
+  const [unitOpen, setUnitOpen] = useState(false);
+  const unitRef = useRef<HTMLDivElement>(null);
+  const unitInputRef = useRef<HTMLInputElement>(null);
+
+  const { data: categoryStats } = useQuery({
+    queryKey: ['catalog', 'stats', 'category-picker'],
+    queryFn: () => apiGet<CatalogStatsResponse>('/v1/catalog/stats/'),
+    retry: false,
+    staleTime: 60_000,
+  });
+  const [customCategories, setCustomCategories] = useState<string[]>(() =>
+    readStoredCustomCategories(),
+  );
+  const categoryOptions = (() => {
+    const byName = new Map<string, number>();
+    for (const stat of categoryStats?.by_category ?? []) {
+      if (stat.category) byName.set(stat.category, stat.count);
+    }
+    for (const cat of customCategories) {
+      if (cat && !byName.has(cat)) byName.set(cat, 0);
+    }
+    if (form.category && !byName.has(form.category)) {
+      byName.set(form.category, 0);
+    }
+    return Array.from(byName.entries())
+      .map(([category, count]) => ({ category, count }))
+      .sort((a, b) => a.category.localeCompare(b.category));
+  })();
+
+  const rememberCustomCategory = useCallback((name: string) => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    setCustomCategories((prev) => {
+      if (prev.some((cat) => cat.toLowerCase() === trimmed.toLowerCase())) {
+        return prev;
+      }
+      const next = [...prev, trimmed];
+      writeStoredCustomCategories(next);
+      return next;
+    });
+  }, []);
+
+  const forgetCustomCategory = useCallback((name: string) => {
+    setCustomCategories((prev) => {
+      const next = prev.filter((cat) => cat !== name);
+      writeStoredCustomCategories(next);
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (currencyRef.current && !currencyRef.current.contains(e.target as Node)) {
+        setCurrencyOpen(false);
+      }
+      if (unitRef.current && !unitRef.current.contains(e.target as Node)) {
+        setUnitOpen(false);
+      }
+    };
+    if (currencyOpen || unitOpen) document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [currencyOpen, unitOpen]);
+
+  // Auto-calculate HH cost when daily wage + burden change
+  useEffect(() => {
+    if ((form.resource_type === 'labor' || form.resource_type === 'operator') && Number(dailyWage) > 0 && Number(burdenPct) > 0) {
+      const hh = (Number(dailyWage) / 8 * (1 + Number(burdenPct) / 100)).toFixed(4);
+      setForm(prev => ({
+        ...prev,
+        base_price: hh,
+        min_price: !prev.min_price || prev.min_price === prev.base_price ? hh : prev.min_price,
+        max_price: !prev.max_price || prev.max_price === prev.base_price ? hh : prev.max_price,
+      }));
+    }
+  }, [dailyWage, burdenPct, form.resource_type]);
+
+  const handleFileToBase64 = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+
+  const handleAddImage = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) {
+      addToast({ type: 'error', title: t('common.error'), message: t('catalog.image_too_large', { defaultValue: 'Image must be under 2 MB' }) });
+      return;
+    }
+    try {
+      const dataUrl = await handleFileToBase64(file);
+      setImages(prev => [...prev, { name: file.name, dataUrl }]);
+    } catch {
+      addToast({ type: 'error', title: t('common.error'), message: 'Failed to read image' });
+    }
+    e.target.value = '';
+  };
+
+  const handleAddDatasheet = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) {
+      addToast({ type: 'error', title: t('common.error'), message: t('catalog.file_too_large', { defaultValue: 'File must be under 5 MB' }) });
+      return;
+    }
+    try {
+      const dataUrl = await handleFileToBase64(file);
+      setDatasheets(prev => [...prev, { name: file.name, dataUrl }]);
+    } catch {
+      addToast({ type: 'error', title: t('common.error'), message: 'Failed to read file' });
+    }
+    e.target.value = '';
+  };
+
+  const TYPES = ['material', 'labor', 'equipment', 'operator', 'subcontractor', 'overhead'];
   // ISO 4217 currency codes - includes all Latin American currencies
-  const CURRENCIES = ['EUR', 'USD', 'GBP', 'CHF', 'CAD', 'AUD', 'AED', 'RUB', 'CNY', 'INR', 'BRL', 'ARS', 'BOB', 'CLP', 'COP', 'CRC', 'MXN', 'PEN', 'UYU'];
-
+  const CURRENCIES = [
+    { value: 'EUR', label: 'EUR - Unión Europea' },
+    { value: 'USD', label: 'USD - Estados Unidos' },
+    { value: 'GBP', label: 'GBP - Reino Unido' },
+    { value: 'CHF', label: 'CHF - Suiza' },
+    { value: 'CAD', label: 'CAD - Canadá' },
+    { value: 'AUD', label: 'AUD - Australia' },
+    { value: 'AED', label: 'AED - Emiratos Árabes Unidos' },
+    { value: 'RUB', label: 'RUB - Rusia' },
+    { value: 'CNY', label: 'CNY - China' },
+    { value: 'INR', label: 'INR - India' },
+    { value: 'BRL', label: 'BRL - Brasil' },
+    { value: 'ARS', label: 'ARS - Argentina' },
+    { value: 'BOB', label: 'BOB - Bolivia' },
+    { value: 'CLP', label: 'CLP - Chile' },
+    { value: 'COP', label: 'COP - Colombia' },
+    { value: 'CRC', label: 'CRC - Costa Rica' },
+    { value: 'MXN', label: 'MXN - México' },
+    { value: 'PEN', label: 'PEN - Perú' },
+    { value: 'UYU', label: 'UYU - Uruguay' },
+  ];
+  const typeOptions = TYPES.includes(form.resource_type)
+    ? TYPES
+    : [form.resource_type, ...TYPES];
+  const unitOptions = UNIT_KEYS.includes(form.unit) ? UNIT_KEYS : [form.unit, ...UNIT_KEYS];
+  const currencyOptions = CURRENCIES.some((c) => c.value === form.currency)
+    ? CURRENCIES
+    : [{ value: form.currency, label: form.currency }, ...CURRENCIES];
+  const filteredCurrencies = currencyOptions.filter(
+    (c) => !currencyQuery || c.label.toLowerCase().includes(currencyQuery.toLowerCase()) || c.value.toLowerCase().includes(currencyQuery.toLowerCase())
+  );
+  const selectedCurrency = currencyOptions.find((c) => c.value === form.currency);
   const handleSubmit = useCallback(async () => {
     if (!form.name.trim()) return;
     setSubmitting(true);
     try {
-      await apiPost('/v1/catalog/', {
-        resource_code: `CUSTOM-${Date.now().toString(36).toUpperCase()}`,
+      const payload: Record<string, unknown> = {
         name: form.name.trim(),
         resource_type: form.resource_type,
         category: form.category.trim() || 'Custom',
         unit: form.unit,
         base_price: parseFloat(form.base_price) || 0,
-        min_price: parseFloat(form.base_price) || 0,
-        max_price: parseFloat(form.base_price) || 0,
+        min_price: parseFloat(form.min_price) || parseFloat(form.base_price) || 0,
+        max_price: parseFloat(form.max_price) || parseFloat(form.base_price) || 0,
         currency: form.currency,
+        specifications: { ...(resource?.specifications ?? {}), description: form.specifications.trim(), images, datasheets, ...(wastePct !== '' && wastePct !== null && wastePct !== undefined ? { waste_pct: Number(wastePct) } : {}), ...(laborRole ? { labor_role: laborRole } : {}), ...(dailyWage !== '' && dailyWage !== null && dailyWage !== undefined ? { daily_wage: Number(dailyWage) } : {}), ...(burdenPct !== '' && burdenPct !== null && burdenPct !== undefined ? { burden_pct: Number(burdenPct) } : {}), ...(fuelCostPerHour !== '' && fuelCostPerHour !== null && fuelCostPerHour !== undefined ? { fuel_cost_per_hour: Number(fuelCostPerHour) } : {}), ...(acquisitionValue !== '' && acquisitionValue !== null && acquisitionValue !== undefined ? { acquisition_value: Number(acquisitionValue) } : {}), ...(usefulLifeYears !== '' && usefulLifeYears !== null && usefulLifeYears !== undefined ? { useful_life_years: Number(usefulLifeYears) } : {}), ...(maintenancePct !== '' && maintenancePct !== null && maintenancePct !== undefined ? { maintenance_pct: Number(maintenancePct) } : {}), },
+      };
+      if (resource) {
+        await apiPatch(`/v1/catalog/${resource.id}`, payload);
+      } else {
+        await apiPost('/v1/catalog/', {
+        resource_code: `CAT-${form.resource_type.slice(0,3).toUpperCase()}-${Date.now().toString(36).toUpperCase().slice(-6)}`,
+        ...payload,
         usage_count: 0,
         source: 'manual',
         region: 'CUSTOM',
+        });
+      }
+      addToast({
+        type: 'success',
+        title: isEditing
+          ? t('catalog.resource_updated', { defaultValue: 'Resource updated' })
+          : t('catalog.resource_created', { defaultValue: 'Resource created' }),
       });
-      addToast({ type: 'success', title: t('catalog.resource_created', { defaultValue: 'Resource created' }) });
-      onCreated();
+      onSaved({
+        category: String(payload.category),
+        region: resource?.region ?? 'CUSTOM',
+      });
     } catch (err) {
       addToast({ type: 'error', title: t('common.error'), message: err instanceof Error ? err.message : 'Failed' });
     } finally {
       setSubmitting(false);
     }
-  }, [form, addToast, t, onCreated]);
+  }, [form, resource, isEditing, addToast, t, onSaved, images, datasheets, wastePct, laborRole, dailyWage, burdenPct]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onClose}>
@@ -2784,10 +3339,16 @@ function CreateResourceModal({
         <div className="flex items-center justify-between px-6 py-4 border-b border-border-light">
           <div>
             <h2 id="catalog-create-resource-title" className="text-base font-semibold text-content-primary">
-              {t('catalog.create_resource', { defaultValue: 'Add Custom Resource' })}
+              {isEditing
+                ? t('catalog.edit_resource', { defaultValue: 'Edit Resource' })
+                : t('catalog.create_resource', { defaultValue: 'Add Custom Resource' })}
             </h2>
             <p className="text-xs text-content-tertiary">
-              {t('catalog.create_resource_desc', { defaultValue: 'Create a new resource for your catalog' })}
+              {isEditing
+                ? t('catalog.edit_resource_desc', {
+                    defaultValue: 'Update catalog data and linked assembly components',
+                  })
+                : t('catalog.create_resource_desc', { defaultValue: 'Create a new resource for your catalog' })}
             </p>
           </div>
           <button onClick={onClose} aria-label={t('common.close', { defaultValue: 'Close' })} className="flex h-8 w-8 items-center justify-center rounded-lg text-content-tertiary hover:bg-surface-secondary">
@@ -2796,6 +3357,29 @@ function CreateResourceModal({
         </div>
 
         <div className="px-6 py-4 space-y-3">
+          {resource && (
+            <div className="rounded-lg border border-border-light bg-surface-secondary/50 px-3 py-2">
+              <div className="grid grid-cols-2 gap-3 text-2xs">
+                <div>
+                  <span className="block text-content-quaternary">
+                    {t('catalog.code', { defaultValue: 'Code' })}
+                  </span>
+                  <span className="font-mono text-content-secondary">{resource.resource_code}</span>
+                </div>
+                <div>
+                  <span className="block text-content-quaternary">
+                    {t('catalog.region_label', { defaultValue: 'Region' })}
+                  </span>
+                  <span className="text-content-secondary">{resource.region ?? '—'}</span>
+                </div>
+              </div>
+              <p className="mt-2 text-2xs text-content-tertiary">
+                {t('catalog.identity_locked', {
+                  defaultValue: 'Code and region are locked to preserve existing references.',
+                })}
+              </p>
+            </div>
+          )}
           <div>
             <label className="text-xs font-medium text-content-secondary mb-1 block">
               {t('catalog.name', { defaultValue: 'Name' })} *
@@ -2808,36 +3392,304 @@ function CreateResourceModal({
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs font-medium text-content-secondary mb-1 block">{t('catalog.type_label', { defaultValue: 'Type' })}</label>
-              <select value={form.resource_type} onChange={(e) => setForm({ ...form, resource_type: e.target.value })}
-                className="h-9 w-full rounded-lg border border-border bg-surface-primary px-2 text-sm focus:outline-none focus:ring-2 focus:ring-oe-blue">
-                {TYPES.map((type) => (
-                  <option key={type} value={type}>
-                    {t(`catalog.type_${type}`, { defaultValue: type.charAt(0).toUpperCase() + type.slice(1) })}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="text-xs font-medium text-content-secondary mb-1 block">{t('catalog.category', { defaultValue: 'Category' })}</label>
-              <input type="text" value={form.category}
-                onChange={(e) => setForm({ ...form, category: e.target.value })}
+          <div>
+            <label className="text-xs font-medium text-content-secondary mb-1 block">{t('catalog.type_label', { defaultValue: 'Type' })}</label>
+            <select value={form.resource_type} onChange={(e) => setForm({ ...form, resource_type: e.target.value })}
+              className="h-9 w-full rounded-lg border border-border bg-surface-primary px-2 text-sm focus:outline-none focus:ring-2 focus:ring-oe-blue">
+              {typeOptions.map((type) => (
+                <option key={type} value={type}>
+                  {t(`catalog.type_${type}`, { defaultValue: type.charAt(0).toUpperCase() + type.slice(1) })}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="text-xs font-medium text-content-secondary mb-1 block">{t('catalog.category', { defaultValue: 'Category' })}</label>
+              <CategoryCombobox
+                value={form.category}
+                onChange={(cat) => {
+                  setForm({ ...form, category: cat });
+                  rememberCustomCategory(cat);
+                }}
+                categories={categoryOptions}
+                onRename={async (oldName, newName) => {
+                  const existingCount = categoryOptions.find((c) => c.category === oldName)?.count ?? 0;
+                  if (existingCount > 0) {
+                  await apiPut('/v1/catalog/categories/rename', {
+                    old_name: oldName,
+                    new_name: newName,
+                  });
+                  }
+                  forgetCustomCategory(oldName);
+                  rememberCustomCategory(newName);
+                  queryClient.invalidateQueries({ queryKey: ['catalog'] });
+                  addToast({
+                    type: 'success',
+                    title: `Categoría renombrada: ${oldName} → ${newName}`,
+                  });
+                }}
+                onDelete={async (name) => {
+                  const existingCount = categoryOptions.find((c) => c.category === name)?.count ?? 0;
+                  if (existingCount > 0) {
+                  await apiDelete(`/v1/catalog/categories/${encodeURIComponent(name)}?reassign_to=Custom`);
+                  }
+                  forgetCustomCategory(name);
+                  queryClient.invalidateQueries({ queryKey: ['catalog'] });
+                  if (form.category === name) {
+                    setForm({ ...form, category: '' });
+                  }
+                  addToast({
+                    type: 'success',
+                    title: `Categoría eliminada: ${name}`,
+                  });
+                }}
                 placeholder={t('catalog.category_placeholder', { defaultValue: 'e.g. Concrete & Cement' })}
-                className="h-9 w-full rounded-lg border border-border bg-surface-primary px-3 text-sm focus:outline-none focus:ring-2 focus:ring-oe-blue"
               />
-            </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-3">
+          {/* Waste % — only for materials */}
+          {form.resource_type === 'material' && (
             <div>
-              <label className="text-xs font-medium text-content-secondary mb-1 block">{t('boq.unit', { defaultValue: 'Unit' })}</label>
-              <select value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value })}
-                className="h-9 w-full rounded-lg border border-border bg-surface-primary px-2 text-sm focus:outline-none focus:ring-2 focus:ring-oe-blue">
-                {UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
-              </select>
+              <label className="text-xs font-medium text-content-secondary mb-1 block">
+                % Desperdicio
+              </label>
+              <div className="flex items-center gap-1.5 mb-1.5 flex-wrap">
+                {[0, 3, 5, 8, 10, 15].map(pct => (
+                  <button key={pct} type="button"
+                    onClick={() => setWastePct(pct)}
+                    className={`px-2 py-0.5 rounded-md text-2xs font-medium transition-colors ${
+                      wastePct === pct
+                        ? 'bg-oe-blue text-white'
+                        : 'bg-surface-secondary text-content-secondary hover:bg-surface-tertiary'
+                    }`}
+                  >
+                    {pct}%
+                  </button>
+                ))}
+              </div>
+              <div className="flex items-center gap-2">
+                <input type="number" min="0" max="100" step="0.5"
+                  value={wastePct === '' || wastePct === null || wastePct === undefined ? '' : wastePct}
+                  onChange={(e) => setWastePct(e.target.value === '' ? '' as unknown as number : Number(e.target.value))}
+                  placeholder="Personalizado"
+                  className="h-8 w-20 rounded-lg border border-border bg-surface-primary px-2 text-xs text-right focus:outline-none focus:ring-2 focus:ring-oe-blue"
+                />
+                <span className="text-xs text-content-tertiary">%</span>
+              </div>
             </div>
+          )}
+
+          {/* Labor fields — only for labor & operator */}
+          {(form.resource_type === 'labor' || form.resource_type === 'operator') && (
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs font-medium text-content-secondary mb-1 block">Rol</label>
+                <select value={laborRole} onChange={(e) => setLaborRole(e.target.value)}
+                  className="h-9 w-full rounded-lg border border-border bg-surface-primary px-2 text-sm focus:outline-none focus:ring-2 focus:ring-oe-blue">
+                  <option value="">Seleccionar...</option>
+                  <option value="capataz">Capataz</option>
+                  <option value="operario">Operario</option>
+                  <option value="oficial">Oficial</option>
+                  <option value="peon">Peón</option>
+                </select>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-medium text-content-secondary mb-1 block">Jornal diario (S/)</label>
+                  <input type="number" step="0.01" min="0"
+                    value={dailyWage === '' || dailyWage === null || dailyWage === undefined ? '' : dailyWage}
+                    onChange={(e) => setDailyWage(e.target.value === '' ? '' as unknown as number : Number(e.target.value))}
+                    placeholder="65.00"
+                    className="h-9 w-full rounded-lg border border-border bg-surface-primary px-3 text-sm text-right focus:outline-none focus:ring-2 focus:ring-oe-blue"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-content-secondary mb-1 block">
+                    Beneficios sociales (%)
+                  </label>
+                  <input type="number" step="0.5" min="0" max="200"
+                    value={burdenPct === '' || burdenPct === null || burdenPct === undefined ? '' : burdenPct}
+                    onChange={(e) => setBurdenPct(e.target.value === '' ? '' as unknown as number : Number(e.target.value))}
+                    placeholder="72.5"
+                    className="h-9 w-full rounded-lg border border-border bg-surface-primary px-3 text-sm text-right focus:outline-none focus:ring-2 focus:ring-oe-blue"
+                  />
+                </div>
+              </div>
+              {dailyWage > 0 && burdenPct > 0 && (
+                <div className="rounded-lg bg-surface-secondary/50 px-3 py-2 text-xs text-content-secondary">
+                  Costo HH estimado:{' '}
+                  <span className="font-semibold text-content-primary">
+                    {(Number(dailyWage) / 8 * (1 + Number(burdenPct) / 100)).toFixed(2)} {form.currency}/HH
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Equipment fields — CAPECO: fuel/hour, acquisition, useful life, maintenance */}
+          {form.resource_type === 'equipment' && (
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-medium text-content-secondary mb-1 block">
+                    Combustible / hora (S/)
+                  </label>
+                  <input type="number" step="0.01" min="0"
+                    value={fuelCostPerHour === '' || fuelCostPerHour === null || fuelCostPerHour === undefined ? '' : fuelCostPerHour}
+                    onChange={(e) => setFuelCostPerHour(e.target.value === '' ? '' as unknown as number : Number(e.target.value))}
+                    placeholder="12.50"
+                    className="h-9 w-full rounded-lg border border-border bg-surface-primary px-3 text-sm text-right focus:outline-none focus:ring-2 focus:ring-oe-blue"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-content-secondary mb-1 block">
+                    Valor adquisición (S/)
+                  </label>
+                  <input type="number" step="0.01" min="0"
+                    value={acquisitionValue === '' || acquisitionValue === null || acquisitionValue === undefined ? '' : acquisitionValue}
+                    onChange={(e) => setAcquisitionValue(e.target.value === '' ? '' as unknown as number : Number(e.target.value))}
+                    placeholder="45000.00"
+                    className="h-9 w-full rounded-lg border border-border bg-surface-primary px-3 text-sm text-right focus:outline-none focus:ring-2 focus:ring-oe-blue"
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-medium text-content-secondary mb-1 block">
+                    Vida útil (años)
+                  </label>
+                  <input type="number" step="0.5" min="0"
+                    value={usefulLifeYears === '' || usefulLifeYears === null || usefulLifeYears === undefined ? '' : usefulLifeYears}
+                    onChange={(e) => setUsefulLifeYears(e.target.value === '' ? '' as unknown as number : Number(e.target.value))}
+                    placeholder="5"
+                    className="h-9 w-full rounded-lg border border-border bg-surface-primary px-3 text-sm text-right focus:outline-none focus:ring-2 focus:ring-oe-blue"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-content-secondary mb-1 block">
+                    Mantenimiento (%)
+                  </label>
+                  <input type="number" step="0.5" min="0" max="100"
+                    value={maintenancePct === '' || maintenancePct === null || maintenancePct === undefined ? '' : maintenancePct}
+                    onChange={(e) => setMaintenancePct(e.target.value === '' ? '' as unknown as number : Number(e.target.value))}
+                    placeholder="5"
+                    className="h-9 w-full rounded-lg border border-border bg-surface-primary px-3 text-sm text-right focus:outline-none focus:ring-2 focus:ring-oe-blue"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {resource && form.currency !== resource.currency && (
+            <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-2xs text-amber-700 dark:border-amber-800 dark:bg-amber-900/10 dark:text-amber-300">
+              <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+              <span>
+                {t('catalog.currency_edit_warning', {
+                  defaultValue:
+                    'Currency can only change when this resource is not used by an assembly.',
+                })}
+              </span>
+            </div>
+          )}
+
+          <div className="grid grid-cols-2 gap-3">
+            <div ref={unitRef}>
+              <label className="text-xs font-medium text-content-secondary mb-1 block">{t('boq.unit', { defaultValue: 'Unit' })}</label>
+              <div className={`relative ${unitOpen ? 'z-[100]' : ''}`}>
+                <div
+                  className="flex items-center gap-2 h-9 w-full rounded-lg border border-border bg-surface-primary px-2 text-sm cursor-pointer focus:outline-none"
+                  onClick={() => { setUnitOpen(true); unitInputRef.current?.focus(); }}
+                >
+                  <Search size={14} className="shrink-0 text-content-quaternary" />
+                  <input
+                    ref={unitInputRef}
+                    type="text"
+                    value={unitOpen ? unitQuery : `${unitSymbol(form.unit)} (${getUnitLabel(form.unit, t)})`}
+                    onChange={(e) => { setUnitQuery(e.target.value); setUnitOpen(true); }}
+                    onFocus={() => setUnitOpen(true)}
+                    placeholder="Buscar unidad..."
+                    className="min-w-0 flex-1 border-0 bg-transparent text-sm text-content-primary placeholder:text-content-tertiary shadow-none outline-none ring-0 focus:border-0 focus:outline-none focus:ring-0 focus:ring-offset-0 focus-visible:outline-none focus-visible:ring-0"
+                  />
+                  <ChevronDown size={14} className={`shrink-0 text-content-quaternary transition-transform ${unitOpen ? 'rotate-180' : ''}`} />
+                </div>
+                {unitOpen && (() => {
+                  const filtered = unitOptions.filter(u => !unitQuery ||
+                    getUnitLabel(u, t).toLowerCase().includes(unitQuery.toLowerCase()) ||
+                    unitSymbol(u).toLowerCase().includes(unitQuery.toLowerCase()) ||
+                    u.toLowerCase().includes(unitQuery.toLowerCase())
+                  );
+                  return (
+                    <div className="absolute z-[9999] mt-1 w-full rounded-lg border border-border-light bg-surface-elevated shadow-lg max-h-48 overflow-y-auto">
+                      {filtered.length === 0 ? (
+                        <div className="px-3 py-4 text-xs text-content-tertiary text-center">Sin resultados</div>
+                      ) : (
+                        filtered.map((u) => (
+                          <div
+                            key={u}
+                            onClick={() => { setForm({ ...form, unit: u }); setUnitOpen(false); setUnitQuery(''); }}
+                            className={`flex items-center gap-2 px-3 py-2 text-sm cursor-pointer hover:bg-oe-blue/10 ${u === form.unit ? 'bg-oe-blue/5' : ''}`}
+                          >
+                            <span className="font-mono text-2xs text-content-quaternary w-10 shrink-0">{unitSymbol(u)}</span>
+                            <span className="text-content-primary truncate">{getUnitLabel(u, t)}</span>
+                            {u === form.unit && <Check size={14} className="ml-auto shrink-0 text-oe-blue" />}
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  );
+                })()}
+              </div>
+            </div>
+            <div ref={currencyRef}>
+              <label className="text-xs font-medium text-content-secondary mb-1 block">{t('catalog.currency', { defaultValue: 'Currency' })}</label>
+              <div className={`relative ${currencyOpen ? 'z-[100]' : ''}`}>
+                <div
+                  className="flex items-center gap-2 h-9 w-full rounded-lg border border-border bg-surface-primary px-2 text-sm cursor-pointer focus:outline-none"
+                  onClick={() => { setCurrencyOpen(true); currencyInputRef.current?.focus(); }}
+                >
+                  <Search size={14} className="shrink-0 text-content-quaternary" />
+                  <input
+                    id="catalog-resource-currency-search"
+                    ref={currencyInputRef}
+                    type="text"
+                    data-allytip="false"
+                    value={currencyOpen ? currencyQuery : (selectedCurrency?.label ?? form.currency)}
+                    onChange={(e) => { setCurrencyQuery(e.target.value); setCurrencyOpen(true); }}
+                    onFocus={() => setCurrencyOpen(true)}
+                    placeholder="Buscar moneda..."
+                    className="min-w-0 flex-1 border-0 bg-transparent text-sm text-content-primary placeholder:text-content-tertiary shadow-none outline-none ring-0 focus:border-0 focus:outline-none focus:ring-0 focus:ring-offset-0 focus-visible:outline-none focus-visible:ring-0"
+                  />
+                  <ChevronDown size={14} className={`shrink-0 text-content-quaternary transition-transform ${currencyOpen ? 'rotate-180' : ''}`} />
+                </div>
+                {currencyOpen && (
+                  <div className="absolute z-[9999] mt-1 w-full rounded-lg border border-border-light bg-surface-elevated shadow-lg max-h-48 overflow-y-auto">
+                    {filteredCurrencies.length === 0 ? (
+                      <div className="px-3 py-4 text-xs text-content-tertiary text-center">
+                        Sin resultados
+                      </div>
+                    ) : (
+                      filteredCurrencies.map((c) => (
+                        <div
+                          key={c.value}
+                          onClick={() => {
+                            setForm({ ...form, currency: c.value });
+                            setCurrencyOpen(false);
+                            setCurrencyQuery('');
+                          }}
+                          className={`flex items-center gap-2 px-3 py-2 text-sm cursor-pointer hover:bg-oe-blue/10 ${c.value === form.currency ? 'bg-oe-blue/5' : ''}`}
+                        >
+                          <span className="font-mono text-2xs text-content-quaternary w-10 shrink-0">{c.value}</span>
+                          <span className="text-content-primary truncate">{c.label}</span>
+                          {c.value === form.currency && <Check size={14} className="ml-auto shrink-0 text-oe-blue" />}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-3">
             <div>
               <label className="text-xs font-medium text-content-secondary mb-1 block">{t('catalog.price', { defaultValue: 'Price' })}</label>
               <input type="number" step="0.01" value={form.base_price}
@@ -2847,12 +3699,69 @@ function CreateResourceModal({
               />
             </div>
             <div>
-              <label className="text-xs font-medium text-content-secondary mb-1 block">{t('catalog.currency', { defaultValue: 'Currency' })}</label>
-              <select value={form.currency} onChange={(e) => setForm({ ...form, currency: e.target.value })}
-                className="h-9 w-full rounded-lg border border-border bg-surface-primary px-2 text-sm focus:outline-none focus:ring-2 focus:ring-oe-blue">
-                {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
-              </select>
+              <label className="text-xs font-medium text-content-secondary mb-1 block">Min Price</label>
+              <input type="number" step="0.01" value={form.min_price}
+                onChange={(e) => setForm({ ...form, min_price: e.target.value })}
+                placeholder={form.base_price || "0.00"}
+                className="h-9 w-full rounded-lg border border-border bg-surface-primary px-3 text-sm text-right focus:outline-none focus:ring-2 focus:ring-oe-blue"
+              />
             </div>
+            <div>
+              <label className="text-xs font-medium text-content-secondary mb-1 block">Max Price</label>
+              <input type="number" step="0.01" value={form.max_price}
+                onChange={(e) => setForm({ ...form, max_price: e.target.value })}
+                placeholder={form.base_price || "0.00"}
+                className="h-9 w-full rounded-lg border border-border bg-surface-primary px-3 text-sm text-right focus:outline-none focus:ring-2 focus:ring-oe-blue"
+              />
+            </div>
+          </div>
+          <div>
+            <label className="text-xs font-medium text-content-secondary mb-1 block">
+              {t('catalog.specifications', { defaultValue: 'Specifications' })}
+            </label>
+            <textarea
+              value={form.specifications}
+              onChange={(e) => setForm({ ...form, specifications: e.target.value })}
+              placeholder={t('catalog.specifications_placeholder', { defaultValue: 'Technical specs, brand, model, standards...' })}
+              rows={4}
+              className="w-full rounded-lg border border-border bg-surface-primary px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-oe-blue"
+            />
+          </div>
+
+          {/* Images */}
+          <div>
+            <label className="text-xs font-medium text-content-secondary mb-1 block">Imágenes</label>
+            <div className="flex flex-wrap gap-2 mb-2">
+              {images.map((img, i) => (
+                <div key={i} className="relative group">
+                  <img src={img.dataUrl} alt={img.name} className="h-16 w-16 rounded-lg border border-border object-cover" />
+                  <button onClick={() => setImages(prev => prev.filter((_, j) => j !== i))}
+                    className="absolute -top-1.5 -right-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-semantic-error text-white opacity-0 group-hover:opacity-100 transition-opacity">
+                    <X size={10} />
+                  </button>
+                </div>
+              ))}
+            </div>
+            <input type="file" accept="image/*" onChange={handleAddImage}
+              className="block w-full text-xs text-content-secondary file:mr-3 file:py-1 file:px-2 file:rounded-md file:border-0 file:text-xs file:font-medium file:bg-surface-secondary file:text-content-primary hover:file:bg-surface-tertiary"
+            />
+          </div>
+
+          {/* Datasheets */}
+          <div>
+            <label className="text-xs font-medium text-content-secondary mb-1 block">Fichas técnicas</label>
+            <div className="flex flex-wrap gap-2 mb-2">
+              {datasheets.map((ds, i) => (
+                <div key={i} className="flex items-center gap-1.5 rounded-lg border border-border bg-surface-primary px-2 py-1 text-xs">
+                  <span className="text-content-secondary max-w-[140px] truncate">{ds.name}</span>
+                  <button onClick={() => setDatasheets(prev => prev.filter((_, j) => j !== i))}
+                    className="text-content-tertiary hover:text-semantic-error"><X size={12} /></button>
+                </div>
+              ))}
+            </div>
+            <input type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt" onChange={handleAddDatasheet}
+              className="block w-full text-xs text-content-secondary file:mr-3 file:py-1 file:px-2 file:rounded-md file:border-0 file:text-xs file:font-medium file:bg-surface-secondary file:text-content-primary hover:file:bg-surface-tertiary"
+            />
           </div>
         </div>
 
@@ -2865,7 +3774,9 @@ function CreateResourceModal({
             onClick={handleSubmit}>
             {submitting
               ? t('catalog.creating', { defaultValue: 'Creating...' })
-              : t('catalog.create_resource_btn', { defaultValue: 'Create Resource' })}
+              : isEditing
+                ? t('common.save_changes', { defaultValue: 'Save changes' })
+                : t('catalog.create_resource_btn', { defaultValue: 'Create Resource' })}
           </Button>
         </div>
       </div>

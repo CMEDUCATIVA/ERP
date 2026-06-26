@@ -10,6 +10,7 @@ Stateless service layer. Handles:
 import logging
 import uuid
 from collections import defaultdict
+from decimal import Decimal, InvalidOperation
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
@@ -32,6 +33,7 @@ from app.modules.catalog.repository import CatalogResourceRepository
 from app.modules.catalog.schemas import (
     CatalogCategoryStat,
     CatalogResourceCreate,
+    CatalogResourceUpdate,
     CatalogSearchQuery,
     CatalogStatsResponse,
     CatalogTypeStat,
@@ -159,6 +161,157 @@ class CatalogResourceService:
 
     # ── Read ──────────────────────────────────────────────────────────────
 
+    async def update_resource(
+        self,
+        resource_id: uuid.UUID,
+        data: CatalogResourceUpdate,
+    ) -> CatalogResource:
+        """Update a resource and synchronize FK-linked assembly components."""
+        resource = await self.get_resource(resource_id)
+        fields = data.model_dump(exclude_unset=True, exclude_none=True)
+        if not fields:
+            return resource
+
+        from app.modules.assemblies.models import Assembly, Component
+        from app.modules.assemblies.service import (
+            _compute_assembly_total,
+            _compute_typed_total,
+        )
+
+        linked_components = list(
+            (
+                await self.session.execute(
+                    select(Component).where(Component.catalog_resource_id == resource_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+        new_currency = fields.get("currency")
+        if (
+            new_currency is not None
+            and str(new_currency).upper() != str(resource.currency).upper()
+            and linked_components
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "Currency cannot be changed while the resource is used by "
+                    f"{len(linked_components)} assembly component(s)."
+                ),
+            )
+
+        def _money(name: str) -> Decimal:
+            raw = fields.get(name, getattr(resource, name))
+            try:
+                value = Decimal(str(raw))
+            except (InvalidOperation, ValueError, TypeError) as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=f"{name} is not a valid decimal value",
+                ) from exc
+            if not value.is_finite() or value < 0:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=f"{name} must be a finite value greater than or equal to 0",
+                )
+            return value
+
+        base_price = _money("base_price")
+        min_price = _money("min_price")
+        max_price = _money("max_price")
+        has_band = min_price > 0 and max_price > 0
+        if has_band and (
+            min_price > max_price or not (min_price <= base_price <= max_price)
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Price band must satisfy min_price <= base_price <= max_price",
+            )
+
+        model_fields: dict[str, object] = {}
+        for key, value in fields.items():
+            if key in {"base_price", "min_price", "max_price"}:
+                model_fields[key] = str(value)
+            elif key == "metadata":
+                model_fields["metadata_"] = value
+            elif key == "currency":
+                model_fields[key] = str(value).upper()
+            else:
+                model_fields[key] = value
+
+        for key, value in model_fields.items():
+            setattr(resource, key, value)
+
+        affected_assembly_ids: set[uuid.UUID] = set()
+        for component in linked_components:
+            if "name" in fields:
+                component.description = str(fields["name"])
+            if "resource_type" in fields:
+                component.resource_type = str(fields["resource_type"])
+                metadata = dict(component.metadata_ or {})
+                metadata["resource_type"] = component.resource_type
+                component.metadata_ = metadata
+            if "unit" in fields:
+                component.unit = str(fields["unit"])
+            if "base_price" in fields:
+                component.unit_cost = str(base_price)
+
+            component.total = _compute_typed_total(
+                resource_type=component.resource_type,
+                factor=float(component.factor),
+                quantity=float(component.quantity),
+                unit_cost=float(component.unit_cost),
+                metadata=dict(component.metadata_ or {}),
+            )
+            affected_assembly_ids.add(component.assembly_id)
+
+        if affected_assembly_ids:
+            assemblies = list(
+                (
+                    await self.session.execute(
+                        select(Assembly).where(Assembly.id.in_(affected_assembly_ids))
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            for assembly in assemblies:
+                components = list(
+                    (
+                        await self.session.execute(
+                            select(Component).where(Component.assembly_id == assembly.id)
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                assembly.total_rate = _compute_assembly_total(
+                    components,
+                    assembly.bid_factor,
+                )
+
+        await self.session.flush()
+        updated = await self.get_resource(resource_id)
+        await _safe_publish(
+            "catalog.resource.updated",
+            {
+                "resource_id": str(resource_id),
+                "base_price": updated.base_price,
+                "changed_fields": sorted(fields),
+                "components_synchronized": True,
+            },
+            source_module="oe_catalog",
+        )
+        logger.info(
+            "Catalog resource updated: %s (%s); linked components=%d",
+            updated.resource_code,
+            resource_id,
+            len(linked_components),
+        )
+        return updated
+
     async def get_resource(self, resource_id: uuid.UUID) -> CatalogResource:
         """Get catalog resource by ID. Raises 404 if not found."""
         resource = await self.repo.get_by_id(resource_id)
@@ -231,6 +384,21 @@ class CatalogResourceService:
         )
         logger.info("Deleted catalog region %s: %d resources removed", region, count)
         return count
+
+    async def delete_resource(self, resource_id: uuid.UUID) -> None:
+        """Delete a single catalog resource by ID. Raises 404 if not found."""
+        deleted = await self.repo.delete_by_id(resource_id)
+        if not deleted:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Catalog resource not found",
+            )
+        await _safe_publish(
+            "catalog.resource.deleted",
+            {"resource_id": str(resource_id)},
+            source_module="oe_catalog",
+        )
+        logger.info("Catalog resource deleted: %s", resource_id)
 
     async def import_region_from_costs(self, region: str) -> dict[str, int]:
         """Import catalog resources from cost item components for a specific region.

@@ -2,7 +2,7 @@ import { useState, useMemo, memo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Ruler } from 'lucide-react';
 import { Card, CardHeader, CardContent } from '@/shared/ui';
-import { getIntlLocale } from '@/shared/lib/formatters';
+import { formatCurrencyDisplay, getIntlLocale } from '@/shared/lib/formatters';
 
 /* ── Types ─────────────────────────────────────────────────────────────── */
 
@@ -49,16 +49,10 @@ const PROJECT_TYPE_OPTIONS: ReadonlyArray<{
 
 function formatCurrencyValue(amount: number, currency: string): string {
   const safe = /^[A-Z]{3}$/.test(currency) ? currency : 'EUR';
-  try {
-    return new Intl.NumberFormat(getIntlLocale(), {
-      style: 'currency',
-      currency: safe,
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(amount);
-  } catch {
-    return `${amount.toFixed(0)} ${safe}`;
-  }
+  return formatCurrencyDisplay(amount, safe, {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  });
 }
 
 type BenchmarkStatus = 'within' | 'near_edge' | 'outside';

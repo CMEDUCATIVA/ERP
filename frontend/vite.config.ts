@@ -4,9 +4,11 @@ import react from '@vitejs/plugin-react';
 import { visualizer } from 'rollup-plugin-visualizer';
 import { VitePWA } from 'vite-plugin-pwa';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import { cpSync, existsSync, readFileSync, createReadStream, statSync } from 'fs';
 import type { Plugin } from 'vite';
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const cesiumSource = path.resolve(__dirname, 'node_modules/cesium/Build/Cesium');
 const cesiumDirs = ['Workers', 'ThirdParty', 'Assets', 'Widgets'] as const;
 

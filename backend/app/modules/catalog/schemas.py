@@ -94,6 +94,27 @@ class CatalogResourceCreate(BaseModel):
 # ── Response ──────────────────────────────────────────────────────────────
 
 
+class CatalogResourceUpdate(BaseModel):
+    """Update editable fields without changing catalog identity."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    name: str | None = Field(default=None, min_length=1, max_length=500)
+    resource_type: str | None = Field(default=None, min_length=1, max_length=20)
+    category: str | None = Field(default=None, min_length=1, max_length=100)
+    unit: str | None = Field(default=None, min_length=1, max_length=20)
+    base_price: Decimal | None = Field(default=None, ge=0)
+    min_price: Decimal | None = Field(default=None, ge=0)
+    max_price: Decimal | None = Field(default=None, ge=0)
+    currency: str | None = Field(default=None, min_length=3, max_length=10)
+    specifications: dict[str, Any] | None = None
+    metadata: dict[str, Any] | None = None
+
+    @field_serializer("base_price", "min_price", "max_price", when_used="json")
+    def _ser_money(self, v: Decimal | None) -> str | None:
+        return _serialise_money(v)
+
+
 class CatalogResourceResponse(BaseModel):
     """‌⁠‍Catalog resource in API responses.
 
@@ -216,6 +237,37 @@ class CatalogCategoryStat(BaseModel):
 
     category: str
     count: int
+
+
+# ── Category management ───────────────────────────────────────────────────
+
+
+class CategoryRename(BaseModel):
+    """Rename a category across all catalog resources."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    old_name: str = Field(..., min_length=1, max_length=100)
+    new_name: str = Field(..., min_length=1, max_length=100)
+
+
+class CategoryRenameResponse(BaseModel):
+    """Result of a category rename operation."""
+
+    updated: int
+    old_name: str
+    new_name: str
+
+
+class CategoryDeleteResponse(BaseModel):
+    """Result of a category delete operation."""
+
+    deleted: bool
+    reassigned: int
+    reassigned_to: str
+
+
+# ── Stats ─────────────────────────────────────────────────────────────────
 
 
 class CatalogStatsResponse(BaseModel):

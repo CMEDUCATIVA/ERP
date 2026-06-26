@@ -54,8 +54,12 @@ from app.dependencies import (
 from app.modules.catalog.schemas import (
     CatalogResourceCreate,
     CatalogResourceResponse,
+    CatalogResourceUpdate,
     CatalogSearchResponse,
     CatalogStatsResponse,
+    CategoryRename,
+    CategoryRenameResponse,
+    CategoryDeleteResponse,
 )
 from app.modules.catalog.service import CatalogResourceService
 
@@ -701,6 +705,38 @@ async def list_cost_positions_using_resource(
     }
 
 
+# ── Category management ──────────────────────────────────────────────
+
+
+@router.put("/categories/rename", response_model=CategoryRenameResponse)
+async def rename_catalog_category(
+    data: CategoryRename,
+    session: SessionDep,
+    _user_id: CurrentUserId,
+    _perm: None = Depends(RequirePermission("catalog.create")),
+) -> CategoryRenameResponse:
+    """Rename a category across all catalog resources."""
+    repo = CatalogResourceRepository(session)
+    updated = await repo.rename_category(data.old_name, data.new_name)
+    logger.info("Category renamed: %s -> %s (%d resources updated)", data.old_name, data.new_name, updated)
+    return CategoryRenameResponse(updated=updated, old_name=data.old_name, new_name=data.new_name)
+
+
+@router.delete("/categories/{name}", response_model=CategoryDeleteResponse)
+async def delete_catalog_category(
+    name: str,
+    session: SessionDep,
+    _user_id: CurrentUserId,
+    _perm: None = Depends(RequirePermission("catalog.create")),
+    reassign_to: str = Query(default="Custom", description="Category to reassign resources to"),
+) -> CategoryDeleteResponse:
+    """Delete a category by reassigning all its resources."""
+    repo = CatalogResourceRepository(session)
+    reassigned = await repo.delete_category(name, reassign_to=reassign_to)
+    logger.info("Category deleted: %s -> %s (%d resources reassigned)", name, reassign_to, reassigned)
+    return CategoryDeleteResponse(deleted=True, reassigned=reassigned, reassigned_to=reassign_to)
+
+
 # ── Single resource ───────────────────────────────────────────────────────
 
 
@@ -716,6 +752,28 @@ async def get_catalog_resource(
 
 
 # ── Create ────────────────────────────────────────────────────────────────
+
+
+@router.patch("/{resource_id}", response_model=CatalogResourceResponse)
+async def update_catalog_resource(
+    resource_id: uuid.UUID,
+    data: CatalogResourceUpdate,
+    service: CatalogResourceService = Depends(_get_service),
+    _user: str = Depends(RequirePermission("catalog.update")),
+) -> CatalogResourceResponse:
+    """Update one resource while preserving its assembly relationships."""
+    resource = await service.update_resource(resource_id, data)
+    return CatalogResourceResponse.model_validate(resource)
+
+
+@router.delete("/{resource_id}", status_code=204)
+async def delete_catalog_resource(
+    resource_id: uuid.UUID,
+    service: CatalogResourceService = Depends(_get_service),
+    _user: str = Depends(RequirePermission("catalog.delete")),
+) -> None:
+    """Delete a single catalog resource."""
+    await service.delete_resource(resource_id)
 
 
 @router.post("/", response_model=CatalogResourceResponse, status_code=201)

@@ -13,8 +13,10 @@ import { Button, Card, Badge, DismissibleInfo, IntroRichText, EmptyState, Skelet
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { apiGet, apiPost, apiDelete } from '@/shared/lib/api';
 import { getIntlLocale } from '@/shared/lib/formatters';
+import { unitKeys, unitSymbol } from '@/shared/lib/unitDefinitions';
 import { copyToClipboard } from '@/shared/lib/browser';
 import { useToastStore } from '@/stores/useToastStore';
+import { usePreferencesStore } from '@/stores/usePreferencesStore';
 import {
   assembliesApi,
   type Assembly,
@@ -32,33 +34,44 @@ type ViewMode = 'grid' | 'table';
 
 /* -- Constants ------------------------------------------------------------ */
 
-// Labels are resolved via t() at render time; keep value-only entries here
-const CATEGORY_VALUES = [
-  { value: '', key: 'assemblies.category_all' },
-  { value: 'concrete', key: 'assemblies.category_concrete' },
-  { value: 'masonry', key: 'assemblies.category_masonry' },
-  { value: 'steel', key: 'assemblies.category_steel' },
-  { value: 'mep', key: 'assemblies.category_mep' },
-  { value: 'earthwork', key: 'assemblies.category_earthwork' },
-  { value: 'insulation', key: 'assemblies.category_insulation' },
-  { value: 'finishing', key: 'assemblies.category_finishing' },
-  { value: 'roofing', key: 'assemblies.category_roofing' },
-  { value: 'general', key: 'assemblies.category_general' },
+// CAPECO 16 classes — official Peruvian construction classification
+// for filtering. Custom categories from regional settings are merged at runtime.
+const CAPECO_CATEGORIES = [
+  { value: '01_obras_provisionales',   label: 'Obras Provisionales, Trabajos Preliminares' },
+  { value: '02_movimiento_tierras',    label: 'Movimiento de Tierras' },
+  { value: '03_concreto_simple',       label: 'Concreto Simple' },
+  { value: '04_concreto_armado',       label: 'Obras de Concreto Armado' },
+  { value: '05_albanileria',           label: 'Albanileria' },
+  { value: '06_revoques_enlucidos',    label: 'Revoques, Enlucidos y Molduras' },
+  { value: '07_pisos_pavimentos',      label: 'Pisos y Pavimentos' },
+  { value: '08_coberturas',            label: 'Coberturas' },
+  { value: '09_carpinteria_madera',    label: 'Carpinteria de Madera' },
+  { value: '10_carpinteria_metalica',  label: 'Carpinteria Metalica' },
+  { value: '11_cerrajeria',            label: 'Cerrajeria' },
+  { value: '12_vidrios_cristales',     label: 'Vidrios, Cristales y Similares' },
+  { value: '13_pintura',               label: 'Pintura' },
+  { value: '14_inst_sanitarias',       label: 'Instalaciones Sanitarias' },
+  { value: '15_inst_electricas',       label: 'Instalaciones Electricas' },
+  { value: '16_obras_complementarias', label: 'Obras Complementarias' },
 ] as const;
 
-const CATEGORY_COLORS: Record<string, 'blue' | 'success' | 'warning' | 'error' | 'neutral'> = {
-  concrete: 'blue',
-  masonry: 'warning',
-  steel: 'neutral',
-  mep: 'success',
-  earthwork: 'warning',
-  insulation: 'blue',
-  finishing: 'success',
-  roofing: 'warning',
-  general: 'neutral',
+// Color mapping for categories — uses a rotating palette so new custom
+// categories get a sensible colour without manual entry for each key.
+const CATEGORY_PALETTE: ('blue' | 'success' | 'warning' | 'error' | 'neutral')[] = [
+  'blue', 'success', 'warning', 'neutral', 'error',
+  'blue', 'warning', 'success', 'neutral', 'blue',
+  'success', 'warning', 'neutral', 'blue', 'success', 'warning',
+];
+
+function getCategoryColor(catValue: string): 'blue' | 'success' | 'warning' | 'error' | 'neutral' {
+  const idx = CAPECO_CATEGORIES.findIndex((c) => c.value === catValue);
+  if (idx >= 0) return CATEGORY_PALETTE[idx] ?? 'neutral';
+  // Custom categories: hash the value for a stable colour
+  const customIdx = (catValue.length + catValue.charCodeAt(0) + catValue.charCodeAt(catValue.length - 1 || 0)) % CATEGORY_PALETTE.length;
+  return CATEGORY_PALETTE[customIdx];
 };
 
-const UNIT_OPTIONS = ['m', 'm2', 'm3', 'kg', 't', 'pcs', 'lsum', 'h', 'set', 'lm'];
+const UNIT_OPTIONS = unitKeys();
 
 /* Templates removed — assemblies are managed via New/AI Generate/Clone/Save from BOQ */
 
@@ -120,6 +133,7 @@ export function AssembliesPage() {
   const [onlyUnused, setOnlyUnused] = useState(false);
   const [showBulkTag, setShowBulkTag] = useState(false);
   const [showBulkConfirmDelete, setShowBulkConfirmDelete] = useState(false);
+  const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
 
   // Debounce search query (300ms)
   useEffect(() => {
@@ -266,15 +280,53 @@ export function AssembliesPage() {
     });
   }, []);
   const clearSelection = useCallback(() => setSelected(new Set()), []);
+  const removeAssembliesFromClientState = useCallback(async (ids: string[]) => {
+    const idSet = new Set(ids);
+    await Promise.all([
+      queryClient.cancelQueries({ queryKey: ['assemblies'] }),
+      queryClient.cancelQueries({ queryKey: ['assemblies-all-for-banner'] }),
+      ...ids.flatMap((id) => [
+        queryClient.cancelQueries({ queryKey: ['assembly', id] }),
+        queryClient.cancelQueries({ queryKey: ['assembly-preview', id] }),
+      ]),
+    ]);
+    queryClient.setQueriesData<AssemblySearchResponse>({ queryKey: ['assemblies'] }, (old) => {
+      if (!old) return old;
+      const items = (old.items ?? []).filter((item) => !idSet.has(item.id));
+      return { ...old, items, total: Math.max(0, old.total - ((old.items ?? []).length - items.length)) };
+    });
+    queryClient.setQueryData<AssemblySearchResponse>(['assemblies-all-for-banner'], (old) => {
+      if (!old) return old;
+      const items = (old.items ?? []).filter((item) => !idSet.has(item.id));
+      return { ...old, items, total: Math.max(0, old.total - ((old.items ?? []).length - items.length)) };
+    });
+    for (const id of ids) {
+      queryClient.removeQueries({ queryKey: ['assembly', id] });
+      queryClient.removeQueries({ queryKey: ['assembly-preview', id] });
+    }
+    setSelected((prev) => {
+      const next = new Set(prev);
+      ids.forEach((id) => next.delete(id));
+      return next;
+    });
+  }, [queryClient]);
 
   // Bulk actions
   const handleBulkDelete = useCallback(async () => {
     const ids = Array.from(selected);
+    setDeletingIds((prev) => new Set([...prev, ...ids]));
     const results = await Promise.allSettled(
       ids.map((id) => apiDelete(`/v1/assemblies/${id}`)),
     );
     const ok = results.filter((r) => r.status === 'fulfilled').length;
     const fail = results.length - ok;
+    const deletedIds = ids.filter((_, idx) => results[idx]?.status === 'fulfilled');
+    await removeAssembliesFromClientState(deletedIds);
+    setDeletingIds((prev) => {
+      const next = new Set(prev);
+      ids.forEach((id) => next.delete(id));
+      return next;
+    });
     setShowBulkConfirmDelete(false);
     clearSelection();
     queryClient.invalidateQueries({ queryKey: ['assemblies'] });
@@ -284,7 +336,7 @@ export function AssembliesPage() {
       type: fail === 0 ? 'success' : 'error',
       title: t('assemblies.bulk_deleted', { defaultValue: `${ok} deleted${fail ? `, ${fail} failed` : ''}` }),
     });
-  }, [selected, addToast, queryClient, clearSelection, t]);
+  }, [selected, addToast, queryClient, clearSelection, t, removeAssembliesFromClientState]);
 
   const handleBulkExport = useCallback(async () => {
     const ids = Array.from(selected);
@@ -689,11 +741,19 @@ export function AssembliesPage() {
               })}
               className="h-10 w-full appearance-none rounded-lg border border-border bg-surface-primary pl-3 pr-9 text-sm text-content-primary transition-all duration-fast ease-oe focus:outline-none focus:ring-2 focus:ring-oe-blue focus:border-transparent hover:border-content-tertiary sm:w-44"
             >
-              {CATEGORY_VALUES.map((c) => (
-                <option key={c.value} value={c.value}>
-                  {t(c.key, { defaultValue: c.value || 'All categories' })}
-                </option>
-              ))}
+              {(() => {
+                const customCats = usePreferencesStore.getState().customAssemblyCategories || [];
+                const merged = [
+                  { value: '', label: 'Todas las categorias' },
+                  ...CAPECO_CATEGORIES,
+                  ...customCats.map((label: string) => ({ value: label, label })),
+                ];
+                return merged.map((c) => (
+                  <option key={c.value} value={c.value}>
+                    {c.label}
+                  </option>
+                ));
+              })()}
             </select>
             <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2.5 text-content-tertiary">
               <ChevronDown size={14} />
@@ -853,6 +913,7 @@ export function AssembliesPage() {
                   key={assembly.id}
                   assembly={assembly}
                   fmt={fmt}
+                  deleting={deletingIds.has(assembly.id)}
                   selected={selected.has(assembly.id)}
                   onToggleSelect={() => toggleSelect(assembly.id)}
                   onClick={() => navigate(`/assemblies/${assembly.id}`)}
@@ -866,12 +927,22 @@ export function AssembliesPage() {
                     }
                   }}
                   onDelete={async () => {
+                    setDeletingIds((prev) => new Set(prev).add(assembly.id));
                     try {
                       await apiDelete(`/v1/assemblies/${assembly.id}`);
+                      await removeAssembliesFromClientState([assembly.id]);
                       queryClient.invalidateQueries({ queryKey: ['assemblies'] });
+                      queryClient.invalidateQueries({ queryKey: ['assemblies-stats'] });
+                      queryClient.invalidateQueries({ queryKey: ['assemblies-all-for-banner'] });
                       addToast({ type: 'success', title: t('toasts.assembly_deleted', { defaultValue: 'Assembly deleted' }) });
                     } catch {
                       addToast({ type: 'error', title: t('toasts.delete_failed', { defaultValue: 'Delete failed' }) });
+                    } finally {
+                      setDeletingIds((prev) => {
+                        const next = new Set(prev);
+                        next.delete(assembly.id);
+                        return next;
+                      });
                     }
                   }}
                   onExport={async () => {
@@ -1176,7 +1247,7 @@ function AssemblyTable({
                   <td className="px-3 py-2 align-middle font-mono text-xs text-content-tertiary">{a.code}</td>
                   <td className="px-3 py-2 align-middle">
                     {a.category ? (
-                      <Badge variant={CATEGORY_COLORS[a.category] ?? 'neutral'} size="sm">{a.category}</Badge>
+                      <Badge variant={getCategoryColor(a.category) ?? 'neutral'} size="sm">{a.category}</Badge>
                     ) : (
                       <span className="text-content-quaternary">—</span>
                     )}
@@ -1502,7 +1573,7 @@ function AIGenerateModal({
                 className="w-full h-9 px-2.5 rounded-lg border border-border-light bg-surface-primary text-sm text-content-primary focus:outline-none focus:ring-2 focus:ring-violet-500/30 appearance-none cursor-pointer"
               >
                 {UNIT_OPTIONS.map((u) => (
-                  <option key={u} value={u}>{u}</option>
+                  <option key={u} value={u}>{unitSymbol(u)}</option>
                 ))}
               </select>
             </div>
@@ -1663,6 +1734,7 @@ function AIGenerateModal({
 function AssemblyCard({
   assembly,
   fmt,
+  deleting,
   onClick,
   onDuplicate,
   onDelete,
@@ -1672,6 +1744,7 @@ function AssemblyCard({
 }: {
   assembly: Assembly;
   fmt: (n: number) => string;
+  deleting: boolean;
   onClick: () => void;
   onDuplicate: () => void;
   onDelete: () => void;
@@ -1696,23 +1769,28 @@ function AssemblyCard({
     hoverTimer.current = setTimeout(() => setHoverPreview(true), 400);
   }, []);
   useEffect(() => () => { if (hoverTimer.current) clearTimeout(hoverTimer.current); }, []);
-  const badgeVariant = CATEGORY_COLORS[assembly.category] ?? 'neutral';
+  const badgeVariant = getCategoryColor(assembly.category) ?? 'neutral';
+  const interactionsBlocked = deleting || confirmDelete;
 
   return (
     <Card
       padding="none"
       hoverable
-      className={`cursor-pointer group relative ${
+      className={`cursor-pointer group relative ${deleting ? 'pointer-events-none opacity-60' : ''} ${menuOpen || previewOpen ? 'z-10' : ''} ${
         selected ? 'ring-2 ring-oe-blue ring-offset-1 ring-offset-surface-primary' : ''
       }`}
-      onClick={onClick}
-      onMouseEnter={scheduleHover}
+      onClick={() => {
+        if (!interactionsBlocked) onClick();
+      }}
+      onMouseEnter={() => {
+        if (!interactionsBlocked) scheduleHover();
+      }}
       onMouseLeave={cancelHover}
     >
       {/* Delete confirmation overlay */}
       {confirmDelete && (
         <div
-          className="absolute inset-0 z-30 flex items-center justify-center rounded-xl bg-white/95 dark:bg-gray-900/95 backdrop-blur-sm p-4"
+          className="pointer-events-auto absolute inset-0 z-30 flex items-center justify-center rounded-xl bg-white/95 dark:bg-gray-900/95 backdrop-blur-sm p-4"
           onClick={(e) => e.stopPropagation()}
         >
           <div className="text-center">
@@ -1722,7 +1800,17 @@ function AssemblyCard({
             <p className="text-sm font-semibold text-content-primary mb-1">{t('assemblies.delete_confirm', { defaultValue: 'Delete assembly?' })}</p>
             <p className="text-xs text-content-tertiary mb-4 max-w-[180px] mx-auto line-clamp-1">{assembly.name}</p>
             <div className="flex items-center justify-center gap-2">
-              <Button variant="danger" size="sm" onClick={() => { onDelete(); setConfirmDelete(false); }}>
+              <Button
+                variant="danger"
+                size="sm"
+                disabled={deleting}
+                onClick={() => {
+                  cancelHover();
+                  setPreviewOpen(false);
+                  setConfirmDelete(false);
+                  onDelete();
+                }}
+              >
                 {t('common.delete')}
               </Button>
               <Button variant="secondary" size="sm" onClick={() => setConfirmDelete(false)}>
@@ -1734,7 +1822,7 @@ function AssemblyCard({
       )}
 
       {/* Quick preview overlay */}
-      {previewOpen && (
+      {previewOpen && !deleting && (
         <QuickPreview
           assemblyId={assembly.id}
           assemblyName={assembly.name}
@@ -1793,14 +1881,14 @@ function AssemblyCard({
         {/* Hover popover — first 3 components with their rates. Only
             fetched after the 400ms hover-intent fires, so we don't
             slam the backend on a hover sweep. */}
-        {hoverPreview && !previewOpen && !confirmDelete && !menuOpen && (
+        {hoverPreview && !previewOpen && !confirmDelete && !menuOpen && !deleting && (
           <HoverComponentsPopover assemblyId={assembly.id} fmt={fmt} />
         )}
 
         {/* Context menu */}
         {menuOpen && (
           <div
-            className="absolute top-10 right-4 z-20 w-44 rounded-lg border border-border bg-surface-elevated shadow-lg overflow-hidden"
+            className="absolute top-10 right-4 z-30 w-44 rounded-lg border border-border bg-surface-elevated shadow-lg overflow-hidden"
             onClick={(e) => e.stopPropagation()}
           >
             <button
@@ -2007,7 +2095,7 @@ function HoverComponentsPopover({
   const top = (data?.components ?? []).slice(0, 3);
   const remaining = Math.max(0, (data?.components?.length ?? 0) - top.length);
   return (
-    <div className="absolute left-2 right-2 top-12 z-20 rounded-lg border border-border bg-surface-elevated shadow-xl px-3 py-2 animate-fade-in pointer-events-none">
+    <div className="absolute left-2 right-2 top-12 z-30 rounded-lg border border-border bg-surface-elevated shadow-xl px-3 py-2 animate-fade-in pointer-events-none">
       <p className="text-2xs uppercase tracking-wide text-content-tertiary mb-1.5">
         {t('assemblies.preview_components', { defaultValue: 'Top components' })}
       </p>

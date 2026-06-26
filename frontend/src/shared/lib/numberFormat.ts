@@ -8,7 +8,7 @@
  * — not "format currency" — so reusing it keeps the BarChart tooltip
  * axis label in sync with the chart value column.
  */
-import { getIntlLocale } from './formatters';
+import { formatCurrencyDisplay, getIntlLocale, PREFIX_CURRENCY_DISPLAY_CODES } from './formatters';
 
 export type ValueFormatKind = 'number' | 'currency' | 'percent';
 
@@ -100,6 +100,17 @@ export function formatValue(
     // Value is already a percentage (e.g. 42.5 means 42.5%).
     const fmt = getFormatter('number', locale, opts);
     return `${fmt.format(value)}%`;
+  }
+
+  if (kind === 'currency') {
+    const code = (opts.currency || '').trim().toUpperCase();
+    if (PREFIX_CURRENCY_DISPLAY_CODES.has(code)) {
+      return formatCurrencyDisplay(value, code, {
+        locale,
+        minimumFractionDigits: opts.minimumFractionDigits ?? 0,
+        maximumFractionDigits: opts.maximumFractionDigits ?? 2,
+      });
+    }
   }
 
   const fmt = getFormatter(kind, locale, opts);

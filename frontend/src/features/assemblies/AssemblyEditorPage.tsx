@@ -1,9 +1,10 @@
-import { useState, useCallback, useRef, useMemo, useEffect } from 'react';
+import { Fragment, useState, useCallback, useRef, useMemo, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Plus,
+  Gauge,
   Trash2,
   Send,
   X,
@@ -36,10 +37,24 @@ import {
   type CreateComponentData,
   type ResourceType,
 } from './api';
+import { fmtWithCurrency } from '../boq/boqHelpers';
+import { unitKeys, unitSymbol, unitLabel } from '@/shared/lib/unitDefinitions';
 
 /* -- Constants ------------------------------------------------------------ */
 
-const UNITS = ['m', 'm2', 'm3', 'kg', 't', 'pcs', 'lsum', 'h', 'set', 'lm'];
+const UNITS = [...unitKeys(), '%MO', '%ST'];
+
+const CAPECO_SECTION_DEFS = [
+  { key: 'material', color: 'material' },
+  { key: 'labor', color: 'labor' },
+  { key: 'operator', color: 'operator' },
+  { key: 'equipment', color: 'equipment' },
+  { key: 'subcontractor', color: 'subcontractor' },
+  { key: 'overhead', color: 'overhead' },
+  { key: 'tax', color: 'overhead' },
+];
+
+const TAX_UNITS = ['%IGV', '%IVA', '%ICMS', '%TAX', '%ST'];
 
 /* -- Component ------------------------------------------------------------ */
 
@@ -66,32 +81,131 @@ export function AssemblyEditorPage() {
   const dragIdx = useRef<number | null>(null);
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
 
-  const { data: assembly, isLoading } = useQuery({
+  const { data: assembly, isLoading, error: assemblyError } = useQuery({
     queryKey: ['assembly', assemblyId],
     queryFn: () => assembliesApi.get(assemblyId!),
     enabled: !!assemblyId,
+    retry: (failureCount, error) => {
+      const status = (error as { status?: number } | null)?.status;
+      return status !== 404 && failureCount < 2;
+    },
   });
+  const assemblyWasDeleted = (assemblyError as { status?: number } | null)?.status === 404;
+  useEffect(() => {
+    if (!assemblyWasDeleted || !assemblyId) return;
+    queryClient.removeQueries({ queryKey: ['assembly', assemblyId] });
+    addToast({
+      type: 'info',
+      title: t('assemblies.deleted_or_missing', { defaultValue: 'Assembly no longer exists' }),
+    });
+    navigate('/assemblies', { replace: true });
+  }, [assemblyWasDeleted, assemblyId, queryClient, addToast, t, navigate]);
+
+  const refreshAssembly = useCallback(async () => {
+    if (!assemblyId) return;
+    await queryClient.invalidateQueries({ queryKey: ['assembly', assemblyId] });
+    await queryClient.refetchQueries({ queryKey: ['assembly', assemblyId], type: 'active' });
+  }, [assemblyId, queryClient]);
 
   const addComponentMutation = useMutation({
     mutationFn: (data: CreateComponentData) =>
       assembliesApi.addComponent(assemblyId!, data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['assembly', assemblyId] });
-      addToast({ type: 'success', title: t('toasts.component_added', { defaultValue: 'Component added' }) });
+    onMutate: async (data) => {
+      await queryClient.cancelQueries({ queryKey: ['assembly', assemblyId] });
+      const previous = queryClient.getQueryData(['assembly', assemblyId]);
+      queryClient.setQueryData(['assembly', assemblyId], (old: any) => {
+        // If cache is empty (first component on a fresh assembly), seed it
+        const tempId = `temp-${Date.now()}`;
+        const newComponent = {
+          id: tempId,
+          assembly_id: assemblyId,
+          description: data.description,
+          resource_type: data.resource_type || null,
+          factor: data.factor || 1,
+          quantity: data.quantity || 1,
+          unit: data.unit || '',
+          unit_cost: data.unit_cost || 0,
+          total: (data.factor || 1) * (data.quantity || 1) * (data.unit_cost || 0),
+          sort_order: (old?.components?.length ?? 0),
+          metadata: data.metadata || {},
+          cost_item_id: null,
+          catalog_resource_id: data.catalog_resource_id || null,
+        };
+        if (!old?.components) {
+          return { ...(old || {}), components: [newComponent] };
+        }
+        return {
+          ...old,
+          components: [...old.components, newComponent],
+        };
+      });
+      return { previous };
     },
-    onError: (error: Error) => {
+    onError: (error: Error, _variables, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(['assembly', assemblyId], context.previous);
+      }
       addToast({ type: 'error', title: t('toasts.error', { defaultValue: 'Error' }), message: error.message });
+    },
+    onSettled: async (_data, error) => {
+      await refreshAssembly();
+      if (!error) {
+        addToast({ type: 'success', title: t('toasts.component_added', { defaultValue: 'Component added' }) });
+      }
     },
   });
 
   const updateComponentMutation = useMutation({
     mutationFn: ({ componentId, data }: { componentId: string; data: Partial<CreateComponentData> }) =>
       assembliesApi.updateComponent(assemblyId!, componentId, data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['assembly', assemblyId] });
+    onMutate: async ({ componentId, data }) => {
+      await queryClient.cancelQueries({ queryKey: ['assembly', assemblyId] });
+      const previous = queryClient.getQueryData(['assembly', assemblyId]);
+      queryClient.setQueryData(['assembly', assemblyId], (old: any) => {
+        if (!old?.components) return old;
+        return {
+          ...old,
+          components: old.components.map((c: any) => {
+            if (c.id !== componentId) return c;
+            const updated = { ...c, ...data };
+            if (data.metadata) {
+              updated.metadata = { ...(c.metadata || {}), ...data.metadata };
+            }
+            // Recalculate total client-side when only metadata changes
+            if (data.metadata && !data.factor && !data.quantity && !data.unit_cost) {
+              const meta = updated.metadata || {};
+              const rt = (c.resource_type || '').toLowerCase();
+              const base = (c.factor || 0) * (c.quantity || 0) * (c.unit_cost || 0);
+              let newTotal = base;
+              if (rt === 'material') {
+                const waste = Number(meta.waste_pct);
+                if (waste > 0) newTotal = base * (1 + waste / 100);
+              } else if (rt === 'labor') {
+                const burden = Number(meta.burden_pct);
+                if (burden > 0) newTotal = base * (1 + burden / 100);
+              } else if (rt === 'equipment') {
+                const days = Number(meta.rental_days) || 0;
+                const fuelDay = Number(meta.fuel_cost) || 0;
+                const fuelHour = Number(meta.fuel_cost_per_hour) || 0;
+                if (days > 0 && fuelDay > 0) newTotal += days * fuelDay;
+                if (fuelHour > 0) newTotal += (c.quantity || 0) * fuelHour;
+              }
+              updated.total = Math.round(newTotal * 100) / 100;
+            }
+            return updated;
+          }),
+        };
+      });
+      return { previous };
     },
-    onError: (error: Error) => {
+    onError: (error: Error, _variables, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(['assembly', assemblyId], context.previous);
+      }
       addToast({ type: 'error', title: t('toasts.update_failed', { defaultValue: 'Update failed' }), message: error.message });
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['assembly', assemblyId] });
     },
   });
 
@@ -130,6 +244,17 @@ export function AssemblyEditorPage() {
     },
   });
 
+  const assemblyMetadataMutation = useMutation({
+    mutationFn: (metadata: Record<string, unknown>) =>
+      assembliesApi.update(assemblyId!, { metadata }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['assembly', assemblyId] });
+    },
+    onError: (error: Error) => {
+      addToast({ type: 'error', title: t('toasts.update_failed', { defaultValue: 'Update failed' }), message: error.message });
+    },
+  });
+
   // Typed seed defaults — picked to look intentional in the editor right
   // after add, so the user sees what each type expects (labor → "h",
   // equipment → "h", material → assembly's own unit). The seed metadata
@@ -149,18 +274,18 @@ export function AssemblyEditorPage() {
         },
         labor: {
           description: t('assemblies.seed_labor', { defaultValue: 'New labor line' }),
-          unit: 'h',
+          unit: 'hh',
           metadata: { crew_size: 1, burden_pct: 0 },
         },
         equipment: {
           description: t('assemblies.seed_equipment', { defaultValue: 'New equipment' }),
-          unit: 'h',
+          unit: 'hm',
           metadata: { rental_days: 0, fuel_cost: 0 },
         },
         operator: {
           description: t('assemblies.seed_operator', { defaultValue: 'New operator' }),
-          unit: 'h',
-          metadata: {},
+          unit: 'hh',
+          metadata: { crew_size: 1 },
         },
         subcontractor: {
           description: t('assemblies.seed_subcontractor', { defaultValue: 'New subcontract' }),
@@ -207,6 +332,7 @@ export function AssemblyEditorPage() {
       // defensively so a stray string can never turn this sum into string
       // concatenation (which produced NaN and dropped whole categories).
       const lineTotal = Number(c.total) || 0;
+      if (TAX_UNITS.includes(c.unit)) continue;
       totals[t] = (totals[t] ?? 0) + lineTotal;
       counts[t] = (counts[t] ?? 0) + 1;
       grand += lineTotal;
@@ -260,10 +386,11 @@ export function AssemblyEditorPage() {
   const fmt = (n: number) =>
     new Intl.NumberFormat(getIntlLocale(), {
       minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
+      maximumFractionDigits: 4,
     }).format(n);
 
-  if (isLoading) {
+  console.log('[guard] isLoading:', isLoading, 'cache:', !!queryClient.getQueryData(['assembly', assemblyId]));
+  if (isLoading && !queryClient.getQueryData(['assembly', assemblyId])) {
     return (
       <div className="w-full py-8 flex flex-col items-center gap-3 text-content-secondary animate-fade-in">
         <Loader2 size={24} className="animate-spin text-oe-blue" />
@@ -272,7 +399,7 @@ export function AssemblyEditorPage() {
     );
   }
 
-  if (!assembly) {
+  if (!assembly && !queryClient.getQueryData(['assembly', assemblyId])) {
     return (
       <div className="w-full py-16 text-center">
         <p className="text-content-secondary">{t('assemblies.not_found', { defaultValue: 'Assembly not found' })}</p>
@@ -280,15 +407,104 @@ export function AssemblyEditorPage() {
     );
   }
 
-  const components = assembly.components ?? [];
-  const computedTotal = components.reduce((sum, c) => sum + c.total, 0);
+  const components = assembly?.components ?? (queryClient.getQueryData(['assembly', assemblyId]) as any)?.components ?? [];
+  const computedTotal = components.reduce((sum, c) => sum + (TAX_UNITS.includes(c.unit) ? 0 : c.total), 0);
   // Prefer the server-persisted total_rate for the headline figure: it already
   // reflects the bid factor AND any per-type typed-formula adjustments
   // (waste / burden / fuel) that the naive client-side sum does not mirror.
   // Fall back to the local sum only when the server hasn't rolled up a rate
   // yet (e.g. a freshly created assembly with no persisted total).
-  const localAdjustedTotal = computedTotal * assembly.bid_factor;
-  const adjustedTotal = assembly.total_rate > 0 ? assembly.total_rate : localAdjustedTotal;
+  const localAdjustedTotal = computedTotal * (assembly?.bid_factor ?? 1);
+  const adjustedTotal = (assembly?.total_rate ?? 0) > 0 ? (assembly?.total_rate ?? 0) : localAdjustedTotal;
+  const getComponentSection = (component: AssemblyComponent) => {
+    if (component.unit === '%MO') return 'equipment';
+    if (TAX_UNITS.includes(component.unit)) return 'tax';
+    const rt = (component.resource_type ?? inferResourceType(component)) as ResourceType;
+    return rt;
+  };
+  const sectionGroups = CAPECO_SECTION_DEFS
+    .map((section) => {
+      const sectionComponents = components.filter(
+        (component) => getComponentSection(component) === section.key,
+      );
+      return {
+        ...section,
+        components: sectionComponents,
+        subtotal: sectionComponents.reduce((sum, component) => sum + component.total, 0),
+      };
+    })
+    .filter((section) => section.components.length > 0);
+  const laborSubtotal = components
+    .filter((component) => {
+      const rt = (component.resource_type ?? inferResourceType(component)) as ResourceType;
+      return component.unit !== '%MO' && (rt === 'labor' || rt === 'operator');
+    })
+    .reduce((sum, component) => sum + component.total, 0);
+  const toolsSubtotal = components
+    .filter((component) => component.unit === '%MO')
+    .reduce((sum, component) => sum + component.total, 0);
+  const hasTools = components.some((component) => component.unit === '%MO');
+  const productivity =
+    Number(assembly.metadata?.productivity ?? assembly.metadata?.rendimiento) || 25;
+  const handleProductivityCommit = (value: string) => {
+    const next = Number(value);
+    if (!Number.isFinite(next) || next <= 0) return;
+    assemblyMetadataMutation.mutate({
+      ...(assembly.metadata ?? {}),
+      productivity: next,
+    });
+  };
+  const hasTax = components.some(c => TAX_UNITS.includes(c.unit));
+  const handleAddTax = () => {
+    setAddMenuOpen(false);
+    addComponentMutation.mutate({
+      description: t('assemblies.tax_row', { defaultValue: 'Impuesto' }),
+      resource_type: 'overhead',
+      factor: 0.01,
+      quantity: 18,
+      unit: '%IGV',
+      unit_cost: computedTotal,
+      metadata: {},
+    });
+  };
+  const crewSizeTotal = components
+    .filter((component) => {
+      const rt = (component.resource_type ?? inferResourceType(component)) as ResourceType;
+      return rt === 'labor' || rt === 'operator';
+    })
+    .reduce((sum, component) => {
+      const crew = Number(component.metadata?.crew_size ?? 0);
+      return sum + (Number.isFinite(crew) ? crew : 0);
+    }, 0);
+  const theoreticalHoursPerUnit =
+    productivity > 0 && crewSizeTotal > 0 ? (8 * crewSizeTotal) / productivity : 0;
+  const handleAddTools = () => {
+    setAddMenuOpen(false);
+    addComponentMutation.mutate({
+      description: t('assemblies.tools_row', { defaultValue: 'Herramientas manuales (% M.O.)' }),
+      resource_type: 'equipment',
+      factor: 0.01,
+      quantity: 3,
+      unit: '%MO',
+      unit_cost: laborSubtotal,
+      metadata: { resource_type: 'equipment', tool_pct: 3 },
+    });
+  };
+
+  const sectionLabelFor = (key: string) =>
+    key === 'material'
+      ? t('assemblies.section_material', { defaultValue: 'MATERIALES' })
+      : key === 'labor'
+        ? t('assemblies.section_labor', { defaultValue: 'MANO DE OBRA' })
+        : key === 'operator'
+          ? t('assemblies.section_operator', { defaultValue: 'OPERADOR' })
+          : key === 'equipment'
+            ? t('assemblies.section_equipment_tools', { defaultValue: 'EQUIPO' })
+            : key === 'subcontractor'
+              ? t('assemblies.section_subcontractor', { defaultValue: 'SUBCONTRATISTA' })
+              : key === 'tax'
+                ? t('assemblies.section_tax', { defaultValue: 'IMPUESTO' })
+                : t('assemblies.section_overhead', { defaultValue: 'GASTOS GENERALES' });
 
   return (
     <div className="space-y-5 animate-fade-in">
@@ -456,6 +672,34 @@ export function AssemblyEditorPage() {
                       })}
                     </button>
                   ))}
+                  {!hasTools && laborSubtotal > 0 && (
+                    <>
+                      <div className="my-1 h-px bg-border-light" />
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={handleAddTools}
+                        className="w-full px-3 py-1.5 text-left text-xs hover:bg-surface-secondary flex items-center gap-2 text-amber-700"
+                      >
+                        <Wrench size={14} />
+                        {t('assemblies.add_tools', { defaultValue: 'Herramientas (3% MO)' })}
+                      </button>
+                    </>
+                  )}
+                  {!hasTax && computedTotal > 0 && (
+                    <>
+                      <div className="my-1 h-px bg-border-light" />
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={handleAddTax}
+                        className="w-full px-3 py-1.5 text-left text-xs hover:bg-surface-secondary flex items-center gap-2 text-slate-700"
+                      >
+                        <Plus size={14} />
+                        {t('assemblies.add_tax', { defaultValue: 'Impuesto' })}
+                      </button>
+                    </>
+                  )}
                   <div className="my-1 h-px bg-border-light" />
                   <button
                     type="button"
@@ -540,6 +784,9 @@ export function AssemblyEditorPage() {
                 <th className="px-4 py-3 font-medium text-content-secondary w-20 text-center">
                   {t('assemblies.type', { defaultValue: 'Type' })}
                 </th>
+                <th className="px-4 py-3 font-medium text-content-secondary w-16 text-right">
+                  {t('assemblies.crew', { defaultValue: 'Cuadrilla' })}
+                </th>
                 <th className="px-4 py-3 font-medium text-content-secondary w-24 text-right">
                   <span className="inline-flex items-center justify-end gap-1">
                     {t('assemblies.factor', { defaultValue: 'Factor' })}
@@ -567,16 +814,50 @@ export function AssemblyEditorPage() {
                   {t('boq.unit')}
                 </th>
                 <th className="px-4 py-3 font-medium text-content-secondary w-28 text-right">
-                  {t('assemblies.unit_cost', { defaultValue: 'Unit Cost' })}
+                  {t('assemblies.unit_cost', { defaultValue: 'Costo Unit.' })}
                 </th>
                 <th className="px-4 py-3 font-medium text-content-secondary w-32 text-right">
-                  {t('boq.total', { defaultValue: 'Total' })}
+                  Parcial
                 </th>
                 <th className="px-4 py-3 w-10" />
               </tr>
             </thead>
             <tbody className="divide-y divide-border-light">
-              {components.map((component, idx) => (
+              {sectionGroups.map((section) => (
+                <Fragment key={section.key}>
+                  <tr>
+                    <td colSpan={10} className="px-4 py-2.5 bg-surface-tertiary">
+                      <span
+                        className={clsx(
+                          'text-[11px] font-bold uppercase tracking-wider',
+                          RESOURCE_TYPE_STYLES[section.color],
+                          'bg-transparent dark:bg-transparent',
+                        )}
+                      >
+                        {sectionLabelFor(section.key)}
+                      </span>
+                    </td>
+                  </tr>
+                  {section.key === 'tax' ? (
+                    section.components.map((component) => (
+                      <TaxRow
+                        key={component.id}
+                        component={component}
+                        breakdown={breakdown}
+                        onUpdate={(data) =>
+                          updateComponentMutation.mutate({
+                            componentId: component.id,
+                            data,
+                          })
+                        }
+                        onDelete={() => deleteComponentMutation.mutate(component.id)}
+                        fmt={fmt}
+                      />
+                    ))
+                  ) : (
+                    section.components.map((component) => {
+                    const idx = components.findIndex((c) => c.id === component.id);
+                    return (
                 <ComponentRow
                   key={component.id}
                   component={component}
@@ -599,11 +880,23 @@ export function AssemblyEditorPage() {
                   }
                   onDelete={() => deleteComponentMutation.mutate(component.id)}
                   fmt={fmt}
-                />
-              ))}
+                    />
+                  );
+                })
+              )}
+                {section.key !== 'tax' && (
+                <tr>
+                  <td className="px-4 py-2.5 text-right text-xs font-semibold text-content-primary tabular-nums bg-surface-tertiary/50" colSpan={9}>
+                    {Number(section.subtotal).toFixed(2)}
+                  </td>
+                  <td className="bg-surface-tertiary/50" />
+                </tr>
+                )}
+              </Fragment>
+            ))}
               {components.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="px-4 py-10 text-center text-content-tertiary">
+                  <td colSpan={10} className="px-4 py-10 text-center text-content-tertiary">
                     {t('assemblies.no_components_hint', { defaultValue: 'No components yet. Use the typed Add buttons (material / labor / equipment / …), pick a row from the cost database, or import a typed resource from the catalog.' })}
                   </td>
                 </tr>
@@ -613,18 +906,18 @@ export function AssemblyEditorPage() {
               <tfoot>
                 {assembly.bid_factor !== 1.0 && (
                   <tr className="border-t border-border-light bg-surface-tertiary/50">
-                    <td colSpan={7} className="px-4 py-2.5 text-right text-sm text-content-secondary">
+                    <td colSpan={8} className="px-4 py-2.5 text-right text-sm text-content-secondary">
                       {t('assemblies.subtotal', { defaultValue: 'Subtotal' })}
                     </td>
                     <td className="px-4 py-2.5 text-right text-sm text-content-secondary tabular-nums">
-                      {fmt(computedTotal)}
+                      {Number(computedTotal).toFixed(2)}
                     </td>
                     <td />
                   </tr>
                 )}
                 {assembly.bid_factor !== 1.0 && (
                   <tr className="border-t border-border-light bg-surface-tertiary/50">
-                    <td colSpan={7} className="px-4 py-2.5 text-right text-sm text-content-secondary">
+                    <td colSpan={8} className="px-4 py-2.5 text-right text-sm text-content-secondary">
                       {t('assemblies.bid_factor', { defaultValue: 'Bid Factor' })} ({assembly.bid_factor})
                     </td>
                     <td className="px-4 py-2.5 text-right text-sm text-content-secondary tabular-nums">
@@ -634,16 +927,11 @@ export function AssemblyEditorPage() {
                   </tr>
                 )}
                 <tr className="border-t-2 border-border bg-surface-tertiary font-semibold">
-                  <td colSpan={7} className="px-4 py-3 text-right text-content-primary">
-                    {assembly.bid_factor !== 1.0
-                      ? t('assemblies.total_rate_adjusted', {
-                          defaultValue: 'Total Rate (\u00d7{{factor}} bid factor)',
-                          factor: assembly.bid_factor,
-                        })
-                      : t('assemblies.total_rate', { defaultValue: 'Total Rate' })}
+                  <td colSpan={8} className="px-4 py-3 text-right text-content-primary">
+                    Tarifa total
                   </td>
                   <td className="px-4 py-3 text-right text-content-primary text-base tabular-nums">
-                    {fmt(adjustedTotal)}
+                    {Number(adjustedTotal).toFixed(2)}
                     <span className="ml-1 text-xs font-normal text-content-tertiary">
                       / {assembly.unit}
                     </span>
@@ -659,9 +947,16 @@ export function AssemblyEditorPage() {
       {/* M/L/E breakdown sidebar */}
       <BreakdownSidebar
         breakdown={breakdown}
+        components={components}
         currency={assembly.currency}
         unit={assembly.unit}
         bidFactor={assembly.bid_factor}
+        productivity={productivity}
+        onProductivityCommit={handleProductivityCommit}
+        theoreticalHoursPerUnit={theoreticalHoursPerUnit}
+        laborSubtotal={laborSubtotal}
+        toolsSubtotal={toolsSubtotal}
+        crewSizeTotal={crewSizeTotal}
       />
       </div>
 
@@ -670,16 +965,11 @@ export function AssemblyEditorPage() {
         <CatalogResourcePickerModal
           assemblyId={assemblyId}
           initialType={catalogPickerType}
+          onAddComponent={addComponentMutation.mutateAsync}
           onClose={() => setCatalogPickerOpen(false)}
-          onAdded={() => {
+          onAdded={async () => {
+            await refreshAssembly();
             setCatalogPickerOpen(false);
-            queryClient.invalidateQueries({ queryKey: ['assembly', assemblyId] });
-            addToast({
-              type: 'success',
-              title: t('assemblies.resource_added_from_catalog', {
-                defaultValue: 'Resource added from catalog',
-              }),
-            });
           }}
         />
       )}
@@ -698,10 +988,11 @@ export function AssemblyEditorPage() {
       {costDbModalOpen && assemblyId && (
         <CostDbSearchForAssembly
           assemblyId={assemblyId}
+          onRefresh={refreshAssembly}
           onClose={() => setCostDbModalOpen(false)}
-          onAdded={() => {
+          onAdded={async () => {
             setCostDbModalOpen(false);
-            queryClient.invalidateQueries({ queryKey: ['assembly', assemblyId] });
+            await refreshAssembly();
             addToast({ type: 'success', title: t('assemblies.components_added_from_db', { defaultValue: 'Components added from cost database' }) });
           }}
         />
@@ -722,12 +1013,14 @@ interface CostSearchItem {
 
 function CostDbSearchForAssembly({
   assemblyId,
+  onRefresh,
   onClose,
   onAdded,
 }: {
   assemblyId: string;
+  onRefresh?: () => Promise<void>;
   onClose: () => void;
-  onAdded: () => void;
+  onAdded: () => void | Promise<void>;
 }) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
@@ -748,10 +1041,10 @@ function CostDbSearchForAssembly({
   // Close handler that always refreshes the assembly data when components were added
   const handleClose = useCallback(() => {
     if (added.size > 0) {
-      queryClient.invalidateQueries({ queryKey: ['assembly', assemblyId] });
+      void (onRefresh?.() ?? queryClient.invalidateQueries({ queryKey: ['assembly', assemblyId] }));
     }
     onClose();
-  }, [added.size, assemblyId, onClose, queryClient]);
+  }, [added.size, assemblyId, onClose, onRefresh, queryClient]);
 
   const handleAdd = useCallback(
     async (item: CostSearchItem) => {
@@ -767,7 +1060,7 @@ function CostDbSearchForAssembly({
         });
         setAdded((prev) => new Set(prev).add(item.id));
         // Refresh the assembly data so components table updates in real time
-        queryClient.invalidateQueries({ queryKey: ['assembly', assemblyId] });
+        await (onRefresh?.() ?? queryClient.invalidateQueries({ queryKey: ['assembly', assemblyId] }));
         addToast({ type: 'success', title: t('common.added', { defaultValue: 'Added' }), message: (item.description || item.code).slice(0, 60) });
       } catch {
         addToast({ type: 'error', title: t('assemblies.add_failed', { defaultValue: 'Failed to add' }) });
@@ -779,7 +1072,7 @@ function CostDbSearchForAssembly({
         });
       }
     },
-    [assemblyId, addToast, t, queryClient],
+    [assemblyId, addToast, t, queryClient, onRefresh],
   );
 
   const fmt = (n: number) =>
@@ -895,12 +1188,21 @@ const EQUIPMENT_KEYWORDS = [
   'kran', 'gerät',
 ];
 
-function inferResourceType(component: AssemblyComponent): 'material' | 'labor' | 'equipment' {
+function inferResourceType(component: AssemblyComponent): ResourceType {
   // Check explicit metadata first
   const meta = component.metadata;
   if (meta && typeof meta === 'object') {
     const rt = (meta as Record<string, unknown>).resource_type;
-    if (rt === 'labor' || rt === 'equipment' || rt === 'material') return rt;
+    if (
+      rt === 'material' ||
+      rt === 'labor' ||
+      rt === 'equipment' ||
+      rt === 'operator' ||
+      rt === 'subcontractor' ||
+      rt === 'overhead'
+    ) {
+      return rt;
+    }
   }
   // Infer from description
   const desc = (component.description || '').toLowerCase();
@@ -959,13 +1261,25 @@ function ComponentRow({
   // table compact; opens to reveal type-specific fields (waste_pct
   // for material, burden_pct for labor, fuel_cost for equipment …).
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [imageModal, setImageModal] = useState<string | null>(null);
 
+  const isTools = component.unit === '%MO';
+  const isTax = component.unit === '%ST';
+  const isSpecial = isTools || isTax;
   const handleBlur = (field: string, value: string) => {
     setEditing(null);
     const numFields = ['factor', 'quantity', 'unit_cost'];
+    const numericValue = parseFloat(value) || 0;
     const update: Partial<CreateComponentData> = {
-      [field]: numFields.includes(field) ? parseFloat(value) || 0 : value,
+      [field]: numFields.includes(field) ? numericValue : value,
     };
+    if (isTools && field === 'quantity') {
+      update.metadata = {
+        ...(component.metadata ?? {}),
+        tool_pct: numericValue,
+        resource_type: 'equipment',
+      };
+    }
     onUpdate(update);
   };
 
@@ -981,11 +1295,78 @@ function ComponentRow({
 
   const resType = (component.resource_type ?? inferResourceType(component)) as ResourceType;
   const meta = (component.metadata ?? {}) as ComponentMetadata;
+  // Components are independent snapshots — read ONLY from metadata.
+  const liveWastePct = (meta.waste_pct as number | undefined);
+  const liveBurdenPct = (meta.burden_pct as number | undefined);
+  const liveDailyWage = (meta.daily_wage as number | undefined);
+  const liveLaborRole = (meta.labor_role as string | undefined) ?? '';
+  const liveFuelPerHour = (meta.fuel_cost_per_hour as number | undefined);
+  const liveAcqValue = (meta.acquisition_value as number | undefined);
+  const liveLifeYears = (meta.useful_life_years as number | undefined);
+  const liveMaintPct = (meta.maintenance_pct as number | undefined);
+  const liveMinPrice = (meta._catalog_min_price as number | undefined);
+  const liveMaxPrice = (meta._catalog_max_price as number | undefined);
+  const liveDescription = (meta.description as string | undefined) ?? '';
+  const liveImages = (meta.images as Array<{ name: string; dataUrl: string }> | undefined) ?? [];
+  const liveDatasheets = (meta.datasheets as Array<{ name: string; dataUrl: string }> | undefined) ?? [];
+  const liveCurrency = ((meta._catalog_currency as string | undefined) ?? 'PEN');
+  const crewEditable = resType === 'labor' || resType === 'operator' || resType === 'equipment';
+  const crewRaw = Number(meta.crew_size ?? (crewEditable ? '' : NaN));
+  const crewDisplay = crewEditable ? (Number.isFinite(crewRaw) ? crewRaw.toFixed(4) : '') : '-';
 
   const cellClass =
     'px-4 py-2.5 transition-colors cursor-text hover:bg-oe-blue-subtle/50';
   const inputClass =
     'w-full bg-transparent border-none outline-none focus:ring-0 p-0 text-sm';
+  const priceValue = (value: number | undefined) =>
+    value != null ? `${Number(value).toFixed(2)} ${liveCurrency}` : '-';
+  const mediaFields = (
+    <>
+      {liveImages.length > 0 && (
+        <div className="block sm:col-span-2">
+          <div className="text-[10px] uppercase tracking-wider text-content-tertiary font-semibold mb-1">
+            {t('assemblies.field_images', { defaultValue: 'Imagenes' })}
+          </div>
+          <div className="flex flex-wrap gap-1">
+            {liveImages.map((img, index) => (
+              <img
+                key={`${img.name}-${index}`}
+                src={img.dataUrl}
+                alt={img.name}
+                className="h-14 w-14 rounded border border-border object-cover cursor-pointer hover:opacity-80 transition-opacity"
+                title={img.name}
+                onClick={() => setImageModal(img.dataUrl)}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+      {liveDatasheets.length > 0 && (
+        <div className="block sm:col-span-2">
+          <div className="text-[10px] uppercase tracking-wider text-content-tertiary font-semibold mb-1">
+            {t('assemblies.field_datasheets', { defaultValue: 'Fichas Tecnicas' })}
+          </div>
+          <div className="space-y-0.5">
+            {liveDatasheets.map((datasheet, index) => (
+              <button
+                key={`${datasheet.name}-${index}`}
+                type="button"
+                className="block text-xs text-oe-blue hover:underline cursor-pointer text-left"
+                onClick={() => {
+                  const a = document.createElement('a');
+                  a.href = datasheet.dataUrl;
+                  a.download = datasheet.name;
+                  a.click();
+                }}
+              >
+                {datasheet.name}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </>
+  );
 
   return (
     <>
@@ -1006,8 +1387,11 @@ function ComponentRow({
 
       {/* Description */}
       <td className={cellClass}>
-        <EditableCell
-          value={component.description}
+        {isTools ? (
+          <span className="block min-h-[20px] text-content-secondary">{component.description}</span>
+        ) : (
+          <EditableCell
+            value={component.description}
           field="description"
           editing={editing}
           setEditing={setEditing}
@@ -1015,12 +1399,15 @@ function ComponentRow({
           className={inputClass}
           placeholder={t('assemblies.enter_description', { defaultValue: 'Enter description...' })}
         />
+        )}
       </td>
 
-      {/* Resource Type — editable. Falls back to legacy text-inference
-          only when the column is null (i.e. legacy row pre-v2940). */}
+      {/* Resource Type — locked for tools, editable otherwise */}
       <td className="px-2 py-2.5 text-center">
-        {(() => {
+        {isTools ? (
+          <span className="block min-h-[20px] text-content-tertiary tabular-nums">-</span>
+        ) : (
+          (() => {
           const resType = (component.resource_type ?? inferResourceType(component)) as ResourceType;
           return (
             <select
@@ -1041,13 +1428,40 @@ function ComponentRow({
               <option value="overhead">{t('assemblies.type_overhead', { defaultValue: 'OH' })}</option>
             </select>
           );
-        })()}
+        })()
+        )}
+      </td>
+
+      {/* Crew */}
+      <td className="px-4 py-2.5 text-right">
+        {crewEditable && component.unit !== '%MO' ? (
+          <EditableCell
+            value={Number(meta.crew_size ?? 0).toFixed(4)}
+            field="crew_size"
+            editing={editing}
+            setEditing={setEditing}
+            onBlur={(field, value) => {
+              setEditing(null);
+              patchMeta('crew_size', value);
+            }}
+            className={`${inputClass} text-right tabular-nums`}
+            type="number"
+            placeholder="0"
+          />
+        ) : (
+          <span className="block min-h-[20px] text-content-tertiary tabular-nums">
+            {component.unit === '%MO' ? '-' : crewDisplay}
+          </span>
+        )}
       </td>
 
       {/* Factor */}
       <td className={`${cellClass} text-right`}>
-        <EditableCell
-          value={String(component.factor)}
+        {isTools ? (
+          <span className="block min-h-[20px] text-content-tertiary tabular-nums">-</span>
+        ) : (
+          <EditableCell
+            value={String(component.factor)}
           field="factor"
           editing={editing}
           setEditing={setEditing}
@@ -1055,12 +1469,13 @@ function ComponentRow({
           className={`${inputClass} text-right`}
           type="number"
         />
+        )}
       </td>
 
       {/* Quantity */}
       <td className={`${cellClass} text-right`}>
         <EditableCell
-          value={String(component.quantity)}
+          value={String(Number(component.quantity).toFixed(4))}
           field="quantity"
           editing={editing}
           setEditing={setEditing}
@@ -1079,7 +1494,7 @@ function ComponentRow({
         >
           {UNITS.map((u) => (
             <option key={u} value={u}>
-              {u}
+              {unitSymbol(u)} ({unitLabel(u, t)})
             </option>
           ))}
         </select>
@@ -1087,8 +1502,11 @@ function ComponentRow({
 
       {/* Unit Cost */}
       <td className={`${cellClass} text-right`}>
-        <EditableCell
-          value={String(component.unit_cost)}
+        {isTools ? (
+          <span className="block min-h-[20px] text-content-tertiary tabular-nums">-</span>
+        ) : (
+          <EditableCell
+            value={Number(component.unit_cost).toFixed(2)}
           field="unit_cost"
           editing={editing}
           setEditing={setEditing}
@@ -1096,11 +1514,12 @@ function ComponentRow({
           className={`${inputClass} text-right`}
           type="number"
         />
+        )}
       </td>
 
       {/* Total (computed) */}
       <td className="px-4 py-2.5 text-right font-semibold text-content-primary tabular-nums">
-        {fmt(component.total)}
+        {Number(component.total).toFixed(2)}
       </td>
 
       {/* Row actions: details toggle + delete. Details opens a sub-row
@@ -1108,6 +1527,7 @@ function ComponentRow({
           — kept off-screen by default to keep the table compact. */}
       <td className="px-2 py-2.5">
         <div className="flex items-center justify-end gap-0.5">
+          {!isTools && (
           <button
             type="button"
             onClick={() => setDetailsOpen((o) => !o)}
@@ -1130,6 +1550,7 @@ function ComponentRow({
               className={clsx('transition-transform', detailsOpen && 'rotate-180')}
             />
           </button>
+          )}
           <button
             onClick={async () => {
               const ok = await confirm({
@@ -1155,106 +1576,210 @@ function ComponentRow({
         rhythm. */}
     {detailsOpen && (
       <tr className="bg-surface-secondary/40 dark:bg-surface-secondary/30">
-        <td colSpan={9} className="px-4 py-3">
+        <td colSpan={10} className="px-4 py-3">
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
             {resType === 'material' && (
               <>
                 <DetailField
-                  label={t('assemblies.field_waste', { defaultValue: 'Waste %' })}
+                  label={t('assemblies.field_waste', { defaultValue: '% Desperdicio' })}
                   hint={t('assemblies.field_waste_hint', {
-                    defaultValue: 'Adds to the line total - e.g. 10 = +10%.',
+                    defaultValue: 'Agrega al total de la linea - ej. 10 = +10%.',
                   })}
                   type="number"
-                  value={meta.waste_pct ?? ''}
+                  value={liveWastePct ?? ''}
                   onCommit={(v) => patchMeta('waste_pct', v)}
                 />
                 <DetailField
-                  label={t('assemblies.field_vendor', { defaultValue: 'Vendor' })}
-                  type="text"
-                  value={(meta.vendor as string | undefined) ?? ''}
-                  onCommit={(v) => patchMeta('vendor', v)}
+                  label={t('assemblies.field_min_price', { defaultValue: 'Precio minimo' })}
+                  type="number"
+                  value={liveMinPrice ?? ''}
+                  onCommit={(v) => patchMeta('_catalog_min_price', v)}
                 />
+                <DetailField
+                  label={t('assemblies.field_max_price', { defaultValue: 'Precio maximo' })}
+                  type="number"
+                  value={liveMaxPrice ?? ''}
+                  onCommit={(v) => patchMeta('_catalog_max_price', v)}
+                />
+                <DetailField
+                  label={t('assemblies.field_specs', { defaultValue: 'Especificaciones' })}
+                  type="text"
+                  value={liveDescription}
+                  onCommit={(v) => patchMeta('description', v)}
+                  span="sm:col-span-2"
+                />
+                {mediaFields}
               </>
             )}
             {resType === 'labor' && (
               <>
                 <DetailField
-                  label={t('assemblies.field_crew', { defaultValue: 'Crew size' })}
-                  type="number"
-                  value={meta.crew_size ?? ''}
-                  onCommit={(v) => patchMeta('crew_size', v)}
-                />
-                <DetailField
-                  label={t('assemblies.field_hours', { defaultValue: 'Hours' })}
-                  hint={t('assemblies.field_hours_hint', {
-                    defaultValue: 'Informational - use the Qty column to drive the total.',
-                  })}
-                  type="number"
-                  value={meta.hours ?? ''}
-                  onCommit={(v) => patchMeta('hours', v)}
-                />
-                <DetailField
-                  label={t('assemblies.field_burden', { defaultValue: 'Burden %' })}
+                  label={t('assemblies.field_burden', { defaultValue: '% Beneficios sociales' })}
                   hint={t('assemblies.field_burden_hint', {
-                    defaultValue: 'Benefits / overhead uplift - e.g. 30 = +30%.',
+                    defaultValue: 'Porcentaje de leyes y beneficios sociales sobre el jornal.',
                   })}
                   type="number"
-                  value={meta.burden_pct ?? ''}
+                  value={liveBurdenPct ?? ''}
                   onCommit={(v) => patchMeta('burden_pct', v)}
                 />
                 <DetailField
-                  label={t('assemblies.field_skill', { defaultValue: 'Skill level' })}
-                  type="text"
-                  value={(meta.skill_level as string | undefined) ?? ''}
-                  onCommit={(v) => patchMeta('skill_level', v)}
+                  label={t('assemblies.field_daily_wage', { defaultValue: 'Jornal diario' })}
+                  type="number"
+                  value={liveDailyWage ?? ''}
+                  onCommit={(v) => patchMeta('daily_wage', v)}
                 />
+                <DetailField
+                  label={t('assemblies.field_labor_role', { defaultValue: 'Rol' })}
+                  type="text"
+                  value={liveLaborRole}
+                  onCommit={(v) => patchMeta('labor_role', v)}
+                />
+                <DetailField
+                  label={t('assemblies.field_min_price', { defaultValue: 'Precio minimo' })}
+                  type="number"
+                  value={liveMinPrice ?? ''}
+                  onCommit={(v) => patchMeta('_catalog_min_price', v)}
+                />
+                <DetailField
+                  label={t('assemblies.field_max_price', { defaultValue: 'Precio maximo' })}
+                  type="number"
+                  value={liveMaxPrice ?? ''}
+                  onCommit={(v) => patchMeta('_catalog_max_price', v)}
+                />
+                <DetailField
+                  label={t('assemblies.field_specs', { defaultValue: 'Especificaciones' })}
+                  type="text"
+                  value={liveDescription}
+                  onCommit={(v) => patchMeta('description', v)}
+                  span="sm:col-span-2"
+                />
+                {mediaFields}
               </>
             )}
             {resType === 'equipment' && (
               <>
                 <DetailField
-                  label={t('assemblies.field_rental_days', { defaultValue: 'Rental days' })}
+                  label={t('assemblies.field_fuel_per_hour', { defaultValue: 'Combustible/hora' })}
                   type="number"
-                  value={meta.rental_days ?? ''}
-                  onCommit={(v) => patchMeta('rental_days', v)}
+                  value={liveFuelPerHour ?? ''}
+                  onCommit={(v) => patchMeta('fuel_cost_per_hour', v)}
                 />
                 <DetailField
-                  label={t('assemblies.field_hourly_rate', { defaultValue: 'Hourly rate' })}
+                  label={t('assemblies.field_acquisition_value', { defaultValue: 'Valor adquisicion' })}
                   type="number"
-                  value={meta.hourly_rate ?? ''}
-                  onCommit={(v) => patchMeta('hourly_rate', v)}
+                  value={liveAcqValue ?? ''}
+                  onCommit={(v) => patchMeta('acquisition_value', v)}
                 />
                 <DetailField
-                  label={t('assemblies.field_fuel', { defaultValue: 'Fuel / day' })}
-                  hint={t('assemblies.field_fuel_hint', {
-                    defaultValue: 'Added on top of qty × unit cost: + days × fuel.',
-                  })}
+                  label={t('assemblies.field_useful_life', { defaultValue: 'Vida util (anos)' })}
                   type="number"
-                  value={meta.fuel_cost ?? ''}
-                  onCommit={(v) => patchMeta('fuel_cost', v)}
+                  value={liveLifeYears ?? ''}
+                  onCommit={(v) => patchMeta('useful_life_years', v)}
                 />
+                <DetailField
+                  label={t('assemblies.field_maintenance_pct', { defaultValue: '% Mantenimiento' })}
+                  type="number"
+                  value={liveMaintPct ?? ''}
+                  onCommit={(v) => patchMeta('maintenance_pct', v)}
+                />
+                <DetailField
+                  label={t('assemblies.field_min_price', { defaultValue: 'Precio minimo' })}
+                  type="number"
+                  value={liveMinPrice ?? ''}
+                  onCommit={(v) => patchMeta('_catalog_min_price', v)}
+                />
+                <DetailField
+                  label={t('assemblies.field_max_price', { defaultValue: 'Precio maximo' })}
+                  type="number"
+                  value={liveMaxPrice ?? ''}
+                  onCommit={(v) => patchMeta('_catalog_max_price', v)}
+                />
+                <DetailField
+                  label={t('assemblies.field_specs', { defaultValue: 'Especificaciones' })}
+                  type="text"
+                  value={liveDescription}
+                  onCommit={(v) => patchMeta('description', v)}
+                  span="sm:col-span-2"
+                />
+                {mediaFields}
               </>
             )}
-            {(resType === 'operator' ||
-              resType === 'subcontractor' ||
-              resType === 'overhead') && (
-              <DetailField
-                label={t('assemblies.field_vendor', { defaultValue: 'Vendor' })}
-                type="text"
-                value={(meta.vendor as string | undefined) ?? ''}
-                onCommit={(v) => patchMeta('vendor', v)}
-              />
+            {resType === 'operator' && (
+              <>
+                <DetailField
+                  label={t('assemblies.field_burden', { defaultValue: '% Beneficios' })}
+                  type="number"
+                  value={liveBurdenPct ?? ''}
+                  onCommit={(v) => patchMeta('burden_pct', v)}
+                />
+                <DetailField
+                  label={t('assemblies.field_daily_wage', { defaultValue: 'Jornal diario' })}
+                  type="number"
+                  value={liveDailyWage ?? ''}
+                  onCommit={(v) => patchMeta('daily_wage', v)}
+                />
+                <DetailField
+                  label={t('assemblies.field_min_price', { defaultValue: 'Precio minimo' })}
+                  type="number"
+                  value={liveMinPrice ?? ''}
+                  onCommit={(v) => patchMeta('_catalog_min_price', v)}
+                />
+                <DetailField
+                  label={t('assemblies.field_max_price', { defaultValue: 'Precio maximo' })}
+                  type="number"
+                  value={liveMaxPrice ?? ''}
+                  onCommit={(v) => patchMeta('_catalog_max_price', v)}
+                />
+                <DetailField
+                  label={t('assemblies.field_specs', { defaultValue: 'Especificaciones' })}
+                  type="text"
+                  value={liveDescription}
+                  onCommit={(v) => patchMeta('description', v)}
+                  span="sm:col-span-2"
+                />
+                {mediaFields}
+              </>
             )}
-            <DetailField
-              label={t('assemblies.field_notes', { defaultValue: 'Notes' })}
-              type="text"
-              value={(meta.notes as string | undefined) ?? ''}
-              onCommit={(v) => patchMeta('notes', v)}
-              span="sm:col-span-2 lg:col-span-2"
-            />
+            {(resType === 'subcontractor' || resType === 'overhead') && (
+              <>
+                <DetailField
+                  label={t('assemblies.field_specs', { defaultValue: 'Especificaciones' })}
+                  type="text"
+                  value={liveDescription}
+                  onCommit={(v) => patchMeta('description', v)}
+                  span="sm:col-span-2"
+                />
+                <DetailField
+                  label={t('assemblies.field_min_price', { defaultValue: 'Precio minimo' })}
+                  type="number"
+                  value={liveMinPrice ?? ''}
+                  onCommit={(v) => patchMeta('_catalog_min_price', v)}
+                />
+                <DetailField
+                  label={t('assemblies.field_max_price', { defaultValue: 'Precio maximo' })}
+                  type="number"
+                  value={liveMaxPrice ?? ''}
+                  onCommit={(v) => patchMeta('_catalog_max_price', v)}
+                />
+                {mediaFields}
+              </>
+            )}
           </div>
         </td>
       </tr>
+    )}
+    {imageModal && (
+      <div
+        className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 cursor-pointer"
+        onClick={() => setImageModal(null)}
+      >
+        <img
+          src={imageModal}
+          alt="Preview"
+          className="max-h-[85vh] max-w-[90vw] rounded-lg shadow-2xl object-contain"
+          onClick={(e) => e.stopPropagation()}
+        />
+      </div>
     )}
     <ConfirmDialog {...confirmProps} />
     </>
@@ -1314,6 +1839,27 @@ function DetailField({
       />
       {hint && <div className="text-[10px] text-content-tertiary mt-1">{hint}</div>}
     </label>
+  );
+}
+
+function ReadOnlyField({
+  label,
+  value,
+  span,
+}: {
+  label: string;
+  value: string;
+  span?: string;
+}) {
+  return (
+    <div className={clsx('block', span)}>
+      <div className="text-[10px] uppercase tracking-wider text-content-tertiary font-semibold mb-1">
+        {label}
+      </div>
+      <div className="w-full rounded-md border border-border-light bg-surface-tertiary px-2 py-1 text-sm text-content-secondary tabular-nums">
+        {value}
+      </div>
+    </div>
   );
 }
 
@@ -1566,6 +2112,112 @@ function ApplyToBOQModal({
   );
 }
 
+/* -- Tax Row ------------------------------------------------------------- */
+
+function TaxRow({
+  component,
+  breakdown,
+  onUpdate,
+  onDelete,
+  fmt,
+}: {
+  component: AssemblyComponent;
+  breakdown: { withBid: number };
+  onUpdate: (data: Partial<CreateComponentData>) => void;
+  onDelete: () => void;
+  fmt: (n: number) => string;
+}) {
+  const { t } = useTranslation();
+  const { confirm, ...confirmProps } = useConfirm();
+  const [pctDraft, setPctDraft] = useState(String(component.quantity ?? ''));
+  const deletingRef = useRef(false);
+
+  useEffect(() => {
+    setPctDraft(String(component.quantity ?? ''));
+  }, [component.quantity]);
+
+  const handleCommit = () => {
+    if (deletingRef.current) return;
+    const v = Number(pctDraft);
+    if (v >= 0 && v <= 100 && v !== component.quantity) {
+      onUpdate({ quantity: v });
+    } else if (!(v >= 0 && v <= 100)) {
+      setPctDraft(String(component.quantity ?? ''));
+    }
+  };
+
+  const taxTotal = (breakdown.withBid * component.quantity) / 100;
+
+  return (
+    <>
+    <tr className="group hover:bg-surface-secondary/50 transition-colors">
+      <td className="px-1 py-2.5 cursor-grab active:cursor-grabbing">
+        <div className="flex items-center justify-center text-content-quaternary group-hover:text-content-tertiary transition-colors">
+          <GripVertical size={14} />
+        </div>
+      </td>
+      <td className="px-4 py-2.5 transition-colors">
+        <span className="block min-h-[20px] text-sm text-content-secondary">{component.description}</span>
+      </td>
+      <td className="px-4 py-2.5 text-center">
+        <span className="block min-h-[20px] text-content-tertiary tabular-nums">-</span>
+      </td>
+      <td className="px-4 py-2.5 text-right">
+        <span className="block min-h-[20px] text-content-tertiary tabular-nums">-</span>
+      </td>
+      <td className="px-4 py-2.5 text-right">
+        <span className="block min-h-[20px] text-content-tertiary tabular-nums">-</span>
+      </td>
+      <td className="px-4 py-2.5 text-right">
+        <input
+          type="number"
+          value={pctDraft}
+          min={0}
+          max={100}
+          onChange={(e) => setPctDraft(e.target.value)}
+          onBlur={handleCommit}
+          onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+          className="w-16 bg-transparent border-none outline-none focus:ring-0 p-0 text-sm text-right tabular-nums"
+        />
+      </td>
+      <td className="px-4 py-2.5 text-center">
+        <select
+          value={component.unit}
+          onChange={(e) => onUpdate({ unit: e.target.value })}
+          className="bg-transparent text-sm text-center cursor-pointer border-none outline-none text-content-secondary hover:text-content-primary"
+        >
+          {['%IGV', '%IVA', '%ICMS', '%TAX'].map(u => (
+            <option key={u} value={u}>{u}</option>
+          ))}
+        </select>
+      </td>
+      <td className="px-4 py-2.5 text-right">
+        <span className="block min-h-[20px] text-content-tertiary tabular-nums">-</span>
+      </td>
+      <td className="px-4 py-2.5 text-right font-semibold text-content-primary tabular-nums">
+        {fmt(taxTotal)}
+      </td>
+      <td className="px-4 py-2.5">
+        <button
+          onMouseDown={() => { deletingRef.current = true; }}
+          onClick={async () => {
+            const ok = await confirm({
+              title: t('assemblies.confirm_delete_component_title', { defaultValue: 'Remove component?' }),
+              message: t('assemblies.confirm_delete_component', { defaultValue: 'Remove this component from the assembly?' }),
+            });
+            if (ok) onDelete();
+          }}
+          className="opacity-0 group-hover:opacity-100 flex h-7 w-7 items-center justify-center rounded-md text-content-tertiary hover:text-semantic-error hover:bg-semantic-error-bg transition-all"
+        >
+          <Trash2 size={14} />
+        </button>
+      </td>
+    </tr>
+    <ConfirmDialog {...confirmProps} />
+    </>
+  );
+}
+
 /* -- M/L/E Breakdown Sidebar --------------------------------------------- */
 
 /**
@@ -1577,9 +2229,16 @@ function ApplyToBOQModal({
  */
 function BreakdownSidebar({
   breakdown,
+  components,
   currency,
   unit,
   bidFactor,
+  productivity,
+  onProductivityCommit,
+  theoreticalHoursPerUnit,
+  laborSubtotal,
+  toolsSubtotal,
+  crewSizeTotal,
 }: {
   breakdown: {
     totals: Record<string, number>;
@@ -1587,16 +2246,24 @@ function BreakdownSidebar({
     grand: number;
     withBid: number;
   };
+  components: AssemblyComponent[];
   currency: string;
   unit: string;
   bidFactor: number;
+  productivity: number;
+  onProductivityCommit: (value: string) => void;
+  theoreticalHoursPerUnit: number;
+  laborSubtotal: number;
+  toolsSubtotal: number;
+  crewSizeTotal: number;
 }) {
   const { t } = useTranslation();
   const fmt = (n: number) =>
     new Intl.NumberFormat(getIntlLocale(), {
       minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
+      maximumFractionDigits: 4,
     }).format(n);
+  const money = (n: number) => fmtWithCurrency(n, getIntlLocale(), currency);
   const order: ResourceType[] = [
     'material',
     'labor',
@@ -1607,11 +2274,11 @@ function BreakdownSidebar({
   ];
   const labelFor = (rt: string) =>
     rt === 'material'
-      ? t('assemblies.type_material_full', { defaultValue: 'Material' })
+      ? t('assemblies.type_material_full', { defaultValue: 'Materiales' })
       : rt === 'labor'
-        ? t('assemblies.type_labor_full', { defaultValue: 'Labor' })
+        ? t('assemblies.type_labor_full', { defaultValue: 'Mano de obra' })
         : rt === 'equipment'
-          ? t('assemblies.type_equipment_full', { defaultValue: 'Equipment' })
+          ? t('assemblies.type_equipment_full', { defaultValue: 'Equipo' })
           : rt === 'operator'
             ? t('assemblies.type_operator_full', { defaultValue: 'Operator' })
             : rt === 'subcontractor'
@@ -1623,12 +2290,40 @@ function BreakdownSidebar({
   const rows = order.filter(
     (rt) => (breakdown.totals[rt] ?? 0) > 0 || (breakdown.counts[rt] ?? 0) > 0,
   );
-  return (
+  const crewRows = components.filter((component) => {
+    const rt = (component.resource_type ?? inferResourceType(component)) as ResourceType;
+    return component.unit !== '%MO' && (rt === 'labor' || rt === 'operator');
+  });
+  const totalLaborWithTools = laborSubtotal + toolsSubtotal;
+  const taxTotal = components
+    .filter(c => TAX_UNITS.includes(c.unit))
+    .reduce((sum, c) => sum + (breakdown.withBid * c.quantity) / 100, 0);
+    return (
     <Card padding="md" className="xl:sticky xl:top-4 self-start">
+      <div className="flex items-center justify-between text-[11px] mb-3">
+        <div className="flex items-center gap-1.5">
+          <Gauge size={14} className="text-amber-600" />
+          <h4 className="text-xs font-semibold uppercase tracking-wider text-content-tertiary">
+            {t('assemblies.productivity', { defaultValue: 'Rendimiento' })}
+          </h4>
+        </div>
+        <span className="flex items-center gap-1 font-medium text-content-secondary tabular-nums">
+          <input
+            type="number"
+            defaultValue={productivity}
+            min={0.01}
+            step={0.01}
+            onBlur={(e) => onProductivityCommit(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+            className="h-6 w-16 rounded border border-border-light bg-surface-primary px-1 text-right text-xs focus:outline-none focus:ring-1 focus:ring-oe-blue/40"
+          />
+          <strong className="font-semibold text-content-primary text-xs">{unit.toLowerCase()}/DIA</strong>
+        </span>
+      </div>
       <div className="flex items-center gap-1.5 mb-3">
         <LayersIcon size={14} className="text-oe-blue" />
         <h3 className="text-xs font-semibold uppercase tracking-wider text-content-tertiary">
-          {t('assemblies.breakdown_title', { defaultValue: 'Cost Drivers' })}
+          {t('assemblies.breakdown_title', { defaultValue: 'Impulsores de Costo' })}
         </h3>
       </div>
       {rows.length === 0 ? (
@@ -1639,7 +2334,7 @@ function BreakdownSidebar({
         </div>
       ) : (
         <div className="space-y-3">
-          {rows.map((rt) => {
+          {rows.filter(r => r === 'material').map((rt) => {
               const value = breakdown.totals[rt] ?? 0;
               const pct = breakdown.grand > 0 ? (value / breakdown.grand) * 100 : 0;
               return (
@@ -1657,8 +2352,82 @@ function BreakdownSidebar({
                     />
                   </div>
                   <div className="text-[11px] text-content-tertiary tabular-nums mt-0.5">
-                    {fmt(value)} {currency}
+                    {money(value)}
                   </div>
+                </div>
+              );
+            })}
+        </div>
+      )}
+      {crewRows.length > 0 && (
+        <div className="mt-4 pt-3 border-t border-border-light">
+          <div className="flex items-center gap-1.5 mb-2">
+            <HardHat size={13} className="text-blue-600" />
+            <h4 className="text-xs font-semibold uppercase tracking-wider text-content-tertiary">
+              {t('assemblies.crew_title', { defaultValue: 'Cuadrilla' })}
+            </h4>
+          </div>
+          <div className="space-y-1.5">
+            {crewRows.map((component) => (
+              <div key={component.id} className="flex items-center justify-between text-xs">
+                <span className="text-content-secondary truncate max-w-[160px]">
+                  {component.description}
+                </span>
+                <span className="font-medium text-content-primary tabular-nums w-12 text-right">
+                  {(() => { const cv = Number(component.metadata?.crew_size ?? 0); return Number.isFinite(cv) ? cv.toFixed(4) : '-'; })()}
+                </span>
+              </div>
+            ))}
+          </div>
+          <div className="mt-1.5 pt-1 border-t border-border-light flex justify-between text-[11px]">
+            <span className="text-content-tertiary">{'Σ'} Cuadrilla</span>
+            <span className="font-semibold text-content-primary tabular-nums">{crewSizeTotal.toFixed(4)}</span>
+          </div>
+          <div className="mt-2 pt-1.5 border-t border-border-light space-y-1">
+            <div className="flex items-center justify-between text-[11px]">
+              <span className="text-content-tertiary">
+                {t('assemblies.theoretical_hh', { defaultValue: 'HH teorico' })}
+              </span>
+              <span className="font-medium text-content-secondary tabular-nums">
+                {fmt(theoreticalHoursPerUnit)} HH/{unit}
+              </span>
+            </div>
+            {toolsSubtotal > 0 && (
+              <div className="flex items-center justify-between text-[11px]">
+                <span className="text-content-tertiary">
+                  {t('assemblies.tools_pct', { defaultValue: 'Herramientas (3%)' })}
+                </span>
+                <span className="font-medium text-content-secondary tabular-nums">
+                  {money(toolsSubtotal)}
+                </span>
+              </div>
+            )}
+            <div className="flex items-center justify-between text-[11px] pt-1 border-t border-border-light">
+              <span className="text-content-tertiary">
+                {t('assemblies.total_labor', { defaultValue: 'Total MO' })}
+              </span>
+              <span className="font-semibold text-content-primary tabular-nums">
+                {money(totalLaborWithTools)}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+      {rows.filter(r => r !== 'material').length > 0 && (
+        <div className="space-y-3 mt-4 pt-3 border-t border-border-light">
+          {rows.filter(r => r !== 'material').map((rt) => {
+              const value = breakdown.totals[rt] ?? 0;
+              const pct = breakdown.grand > 0 ? (value / breakdown.grand) * 100 : 0;
+              return (
+                <div key={rt}>
+                  <div className="flex items-baseline justify-between gap-2 text-xs mb-1">
+                    <span className="font-medium text-content-secondary">{labelFor(rt)}</span>
+                    <span className="text-content-tertiary tabular-nums">{pct.toFixed(0)}%</span>
+                  </div>
+                  <div className="h-1.5 rounded-full bg-surface-tertiary overflow-hidden">
+                    <div className={`h-full rounded-full transition-all ${RESOURCE_TYPE_BAR[rt]}`} style={{ width: `${pct}%` }} />
+                  </div>
+                  <div className="text-[11px] text-content-tertiary tabular-nums mt-0.5">{money(value)}</div>
                 </div>
               );
             })}
@@ -1671,7 +2440,7 @@ function BreakdownSidebar({
               {t('assemblies.breakdown_subtotal', { defaultValue: 'Subtotal' })}
             </span>
             <span className="font-medium text-content-secondary tabular-nums">
-              {fmt(breakdown.grand)} {currency}
+              {money(breakdown.grand)}
             </span>
           </div>
           {bidFactor !== 1.0 && (
@@ -1689,7 +2458,7 @@ function BreakdownSidebar({
               {t('assemblies.breakdown_total', { defaultValue: 'Total / unit' })}
             </span>
             <span className="font-bold text-content-primary tabular-nums">
-              {fmt(breakdown.withBid)} {currency} / {unit}
+              {money(breakdown.withBid + taxTotal)} / {unit}
             </span>
           </div>
         </div>
@@ -1708,8 +2477,11 @@ interface CatalogResourceItem {
   category: string;
   unit: string;
   base_price: number;
+  min_price?: number;
+  max_price?: number;
   currency: string;
   region: string | null;
+  specifications?: Record<string, unknown>;
 }
 
 /**
@@ -1723,11 +2495,13 @@ function CatalogResourcePickerModal({
   initialType,
   onClose,
   onAdded,
+  onAddComponent,
 }: {
   assemblyId: string;
   initialType: ResourceType | null;
   onClose: () => void;
-  onAdded: () => void;
+  onAdded: () => void | Promise<void>;
+  onAddComponent?: (data: CreateComponentData) => Promise<unknown>;
 }) {
   const { t } = useTranslation();
   const [query, setQuery] = useState('');
@@ -1754,6 +2528,31 @@ function CatalogResourcePickerModal({
     mutationFn: async (item: CatalogResourceItem) => {
       setAdding(item.id);
       try {
+        if (onAddComponent) {
+          const specs = item.specifications ?? {};
+          await onAddComponent({
+            catalog_resource_id: item.id,
+            description: item.name,
+            resource_type: (item.resource_type as ResourceType) || 'material',
+            factor: 1,
+            quantity: 1,
+            unit: item.unit || 'pcs',
+            unit_cost: item.base_price || 0,
+            metadata: {
+              ...specs,
+              resource_type: item.resource_type,
+              category: item.category,
+              _catalog_base_price: item.base_price,
+              _catalog_min_price: item.min_price,
+              _catalog_max_price: item.max_price,
+              _catalog_category: item.category,
+              _catalog_currency: item.currency,
+              _catalog_region: item.region,
+            },
+          });
+          return;
+        }
+        const specs = item.specifications ?? {};
         await assembliesApi.addComponent(assemblyId, {
           catalog_resource_id: item.id,
           description: item.name,
@@ -1762,6 +2561,17 @@ function CatalogResourcePickerModal({
           quantity: 1,
           unit: item.unit || 'pcs',
           unit_cost: item.base_price || 0,
+          metadata: {
+            ...specs,
+            resource_type: item.resource_type,
+            category: item.category,
+            _catalog_base_price: item.base_price,
+            _catalog_min_price: item.min_price,
+            _catalog_max_price: item.max_price,
+            _catalog_category: item.category,
+            _catalog_currency: item.currency,
+            _catalog_region: item.region,
+          },
         });
       } finally {
         setAdding(null);

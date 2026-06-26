@@ -14,6 +14,7 @@ import uuid
 from decimal import Decimal, InvalidOperation
 
 from fastapi import HTTPException, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.events import event_bus
@@ -21,6 +22,7 @@ from app.core.i18n import get_locale
 from app.core.validation.messages import translate
 from app.modules.assemblies.models import Assembly, Component
 from app.modules.assemblies.repository import AssemblyRepository, ComponentRepository
+from app.modules.catalog.models import CatalogResource
 from app.modules.assemblies.schemas import (
     ApplyToBOQRequest,
     AssemblyCreate,
@@ -125,10 +127,11 @@ def _compute_typed_total(
                     is encouraged to put hours in ``quantity``); the
                     final cost gets a burden uplift via
                     base × (1 + burden_pct/100).
-    * **equipment** base + (rental_days * fuel_cost_per_day) - fuel is
-                    additive because it's a separate line on most
-                    rental contracts; if both ``rental_days`` and a
-                    per-day ``fuel_cost`` are set we add their product.
+    * **equipment** base
+                    + (rental_days * fuel_cost)                    [fuel per day]
+                    + (quantity    * fuel_cost_per_hour)           [fuel per hour]
+                    Both add-ons are independent; each fires only when
+                    its operands are positive.
 
     Returns a string for SQLite-safe storage. Negative or zero results
     fall through to the unmodified triple - never punish the user with
@@ -158,9 +161,17 @@ def _compute_typed_total(
                     return str(result)
         elif rt == "equipment":
             days = _safe_meta_multiplier(metadata.get("rental_days"))
-            fuel = _safe_meta_multiplier(metadata.get("fuel_cost"))
-            if days is not None and fuel is not None and days > 0 and fuel > 0:
-                result = base + days * fuel
+            fuel_day = _safe_meta_multiplier(metadata.get("fuel_cost"))
+            fuel_hour = _safe_meta_multiplier(metadata.get("fuel_cost_per_hour"))
+            add = Decimal("0")
+            if days is not None and fuel_day is not None and days > 0 and fuel_day > 0:
+                add += days * fuel_day
+            # fuel_cost_per_hour: additive per operating hour (quantity)
+            if fuel_hour is not None and fuel_hour > 0:
+                qty = Decimal(str(quantity)) if quantity else Decimal("0")
+                add += qty * fuel_hour
+            if add > 0:
+                result = base + add
                 if result.is_finite():
                     return str(result)
     except (InvalidOperation, ValueError):
@@ -180,7 +191,7 @@ def _str_to_float(value: str | None) -> float:
 
 
 # Upper bound for a metadata multiplier (waste_pct / burden_pct /
-# rental_days / fuel_cost). Mirrors ``schemas._NUM_MAX`` - far beyond
+# rental_days / fuel_cost / fuel_cost_per_hour). Mirrors ``schemas._NUM_MAX`` - far beyond
 # any real estimating value, yet keeps the typed-total product finite.
 _META_NUM_MAX = Decimal("1e12")
 
@@ -190,7 +201,7 @@ def _safe_meta_multiplier(raw: object) -> Decimal | None:
 
     The typed-total formula (``_compute_typed_total``) reads free-form
     ``metadata`` keys (waste_pct / burden_pct / rental_days /
-    fuel_cost). Those are NOT covered by the Pydantic ``ge/le/
+    fuel_cost / fuel_cost_per_hour). Those are NOT covered by the Pydantic ``ge/le/
     allow_inf_nan`` bounds on factor/quantity/unit_cost, so a payload
     like ``{"waste_pct": "Infinity"}`` or ``{"burden_pct": -50}`` would
     otherwise flow straight into ``base * (1 + x/100)`` and persist a
@@ -307,8 +318,28 @@ def _sum_component_totals(components: list[Component]) -> Decimal:
     return total
 
 
-def _compute_assembly_total(components: list[Component], bid_factor: str) -> str:
-    """Compute assembly total_rate = sum(component totals) * bid_factor.
+def _sum_labor_totals(components: list[Component]) -> Decimal:
+    """Sum totals of labor + operator components only (for tool_pct calculation)."""
+    total = Decimal("0")
+    for comp in components:
+        if comp.resource_type not in ("labor", "operator") or comp.unit == '%MO':
+            continue
+        try:
+            val = Decimal(str(comp.total))
+        except (InvalidOperation, ValueError):
+            continue
+        if not val.is_finite():
+            continue
+        total += val
+    return total
+
+
+def _compute_assembly_total(
+    components: list[Component],
+    bid_factor: str,
+    tool_pct: float | None = None,
+) -> str:
+    """Compute assembly total_rate = sum(component totals) + tool_pct * labor, then * bid_factor.
 
     Hardened (NEW-ASM-104): a non-finite ``bid_factor`` string (or a
     product that overflows to ``Infinity``) is rejected to "0" rather
@@ -317,6 +348,12 @@ def _compute_assembly_total(components: list[Component], bid_factor: str) -> str
     """
     try:
         subtotal = _sum_component_totals(components)
+        # Herramientas (% MO): add tool_pct% of labor subtotal
+        if tool_pct and tool_pct > 0:
+            labor = _sum_labor_totals(components)
+            tool_add = labor * (Decimal(str(tool_pct)) / Decimal("100"))
+            if tool_add.is_finite():
+                subtotal += tool_add
         bf = Decimal(str(bid_factor))
         if not bf.is_finite():
             return "0"
@@ -508,8 +545,8 @@ class AssemblyService:
         if fields:
             await self.assembly_repo.update_fields(assembly_id, **fields)
 
-            # Recalculate total if bid_factor changed
-            if "bid_factor" in fields:
+            # Recalculate total if bid_factor or metadata changed (metadata may contain tool_pct)
+            if "bid_factor" in fields or "metadata_" in fields:
                 await self._recalculate_total(assembly_id)
 
             await _safe_publish(
@@ -793,18 +830,29 @@ class AssemblyService:
         )
 
     async def _recalculate_total(self, assembly_id: uuid.UUID) -> None:
-        """Recalculate assembly total_rate from all component totals * bid_factor.
-
-        Fetches the assembly and all its components, sums component totals,
-        multiplies by bid_factor, and persists the result.
-        """
+        """Recalculate assembly total_rate and refresh %MO/%ST totals."""
         assembly = await self.assembly_repo.get_by_id(assembly_id)
         if assembly is None:
             return
 
         components = await self.component_repo.list_for_assembly(assembly_id)
-        new_total = _compute_assembly_total(components, assembly.bid_factor)
 
+        # Refresh %MO tools: total = percentage of labor subtotal.
+        # The editable percentage lives in component.quantity. Older rows
+        # stored it only as metadata.tool_pct, so keep that as a fallback.
+        labor = _sum_labor_totals(components)
+        for comp in components:
+            if comp.unit == '%MO':
+                meta = comp.metadata_ or {}
+                tool_pct = _safe_meta_multiplier(comp.quantity)
+                if tool_pct is None:
+                    tool_pct = _safe_meta_multiplier(meta.get("tool_pct")) or Decimal("0")
+                new_total = labor * (tool_pct / Decimal("100"))
+                if new_total.is_finite():
+                    comp.total = str(new_total)
+                    await self.component_repo.update_fields(comp.id, total=str(new_total))
+
+        new_total = _compute_assembly_total(components, assembly.bid_factor, tool_pct=None)
         await self.assembly_repo.update_fields(assembly_id, total_rate=new_total)
 
     async def apply_to_boq(self, assembly_id: uuid.UUID, data: ApplyToBOQRequest) -> object:
@@ -967,6 +1015,16 @@ class AssemblyService:
         # Fetch components separately to avoid MissingGreenlet (noload on get_assembly)
         components = await self.component_repo.list_for_assembly(assembly_id)
 
+        # Batch-fetch catalog resource codes so BOQ resource rows carry the
+        # real catalogue code (e.g. CAPECO 0147010001) rather than an empty string.
+        catalog_ids = [c.catalog_resource_id for c in components if c.catalog_resource_id]
+        catalog_code_map: dict[uuid.UUID, str] = {}
+        if catalog_ids:
+            stmt = select(CatalogResource).where(CatalogResource.id.in_(catalog_ids))
+            result = await self.session.execute(stmt)
+            catalog_resources = result.scalars().all()
+            catalog_code_map = {cr.id: cr.resource_code for cr in catalog_resources if cr.resource_code}
+
         # Build resource list from assembly components.
         # Trust the new ``resource_type`` column; only fall back to
         # description heuristics for legacy rows that the v2940
@@ -1015,6 +1073,9 @@ class AssemblyService:
             resource_uplift = Decimal("1")
         for comp in components:
             res_type = comp.resource_type or _infer_legacy(comp.description or "")
+            # %MO tools always belong to EQUIPO, never MANO DE OBRA
+            if comp.unit == '%MO':
+                res_type = 'equipment'
             # The component's adjusted contribution (factor*quantity*unit_cost
             # plus typed uplift), scaled by the assembly-level uplift.
             try:
@@ -1041,7 +1102,7 @@ class AssemblyService:
             resources.append(
                 {
                     "name": comp.description or "",
-                    "code": "",
+                    "code": catalog_code_map.get(comp.catalog_resource_id, ""),
                     "type": res_type,
                     "unit": comp.unit or "",
                     "quantity": res_quantity,
@@ -1054,6 +1115,10 @@ class AssemblyService:
                     "metadata": dict(comp.metadata_) if comp.metadata_ else {},
                 }
             )
+
+        # Sort resources by CAPECO section order: material → labor → equipment
+        _type_order = {"material": 0, "labor": 1, "operator": 2, "equipment": 3}
+        resources.sort(key=lambda r: _type_order.get(r["type"], 99))
 
         # Compute the breakdown payload - totals per type plus
         # percentages of the rolled subtotal.

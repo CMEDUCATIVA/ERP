@@ -7,8 +7,9 @@
  */
 
 import type { Position, Markup } from './api';
-import { getIntlLocale } from '@/shared/lib/formatters';
+import { currencyDisplaySymbol, formatCurrencyDisplay, getIntlLocale } from '@/shared/lib/formatters';
 import { apiGet, apiPatch } from '@/shared/lib/api';
+import { unitLabel, unitKeys } from '@/shared/lib/unitDefinitions';
 
 /* ── Constants ───────────────────────────────────────────────────────── */
 
@@ -344,7 +345,8 @@ export function getLocaleForRegion(region?: string): string {
 /** Map currency code to symbol. */
 const CURRENCY_SYMBOLS: Record<string, string> = {
   EUR: '\u20ac', GBP: '\u00a3', USD: '$', CHF: 'Fr.', CAD: 'C$', AUD: 'A$', NZD: 'NZ$',
-  JPY: '\u00a5', CNY: '\u00a5', KRW: '\u20a9', INR: '\u20b9', BRL: 'R$', MXN: 'Mex$', TRY: '\u20ba',
+  JPY: '\u00a5', CNY: '\u00a5', KRW: '\u20a9', INR: '\u20b9', BRL: 'R$', MXN: 'Mex$', ARS: 'AR$',
+  CLP: 'CL$', PEN: 'S/', COP: 'COL$', BOB: 'Bs.', TRY: '\u20ba',
   RUB: '\u20bd', PLN: 'z\u0142', CZK: 'K\u010d', SEK: 'kr', NOK: 'kr', DKK: 'kr',
   AED: '\u062f.\u0625', SAR: '\ufdfc', QAR: '\ufdfc', ZAR: 'R', EGP: 'E\u00a3', NGN: '\u20a6',
   SGD: 'S$', MYR: 'RM', THB: '\u0e3f', IDR: 'Rp', PHP: '\u20b1', HKD: 'HK$',
@@ -364,7 +366,7 @@ export function getCurrencySymbol(currencyStr?: string): string {
   if (match?.[1]) return match[1];
   // Try plain 3-letter code: "CAD", "EUR", "GBP"
   const code = currencyStr.trim().substring(0, 3).toUpperCase();
-  return CURRENCY_SYMBOLS[code] || code;
+  return CURRENCY_SYMBOLS[code] || currencyDisplaySymbol(code);
 }
 
 /* ── Currency Code Extraction ───────────────────────────────────────── */
@@ -429,12 +431,11 @@ export function fmtWithCurrency(
     }).format(value);
   }
   try {
-    return new Intl.NumberFormat(safeLocale, {
-      style: 'currency',
-      currency: trimmed,
+    return formatCurrencyDisplay(value, trimmed, {
+      locale: safeLocale,
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
-    }).format(value);
+    });
   } catch {
     // Fallback: use the plain number formatter + symbol
     const fmt = new Intl.NumberFormat(safeLocale, {
@@ -706,7 +707,8 @@ export const COMMON_CURRENCIES: readonly string[] = [
 export const CURRENCY_SYMBOL: Record<string, string> = {
   USD: '$', EUR: '€', GBP: '£', CHF: 'Fr', JPY: '¥', CNY: '¥',
   CAD: '$', AUD: '$', NZD: '$', SGD: '$', HKD: '$', KRW: '₩',
-  INR: '₹', BRL: 'R$', MXN: '$', ZAR: 'R', TRY: '₺', RUB: '₽',
+  INR: '₹', BRL: 'R$', MXN: 'Mex$', ARS: 'AR$', CLP: 'CL$', PEN: 'S/', COP: 'COL$', BOB: 'Bs.',
+  ZAR: 'R', TRY: '₺', RUB: '₽',
   PLN: 'zł', CZK: 'Kč', HUF: 'Ft', SEK: 'kr', NOK: 'kr', DKK: 'kr', RON: 'lei',
   AED: 'د.إ', SAR: '﷼', QAR: '﷼', ILS: '₪',
   THB: '฿', IDR: 'Rp', MYR: 'RM', PHP: '₱', VND: '₫',
@@ -738,4 +740,14 @@ export interface Tip {
   id: string;
   text: string;
   condition?: 'no_sections' | 'no_markups' | 'has_empty_descriptions' | 'always';
+}
+
+/** Resolve a human-readable label for a unit abbreviation (e.g. "m2" → "metro cuadrado"). */
+export function getUnitLabel(unit: string, t?: (key: string, opts?: Record<string, string>) => string): string {
+  return unitLabel(unit, t);
+}
+
+/** Get all unit keys from the canonical registry. */
+export function getAllUnitKeys(): string[] {
+  return unitKeys();
 }

@@ -63,6 +63,64 @@ export function fmtCompact(value: number | string | null | undefined): string {
   }).format(safe);
 }
 
+export const CURRENCY_DISPLAY_SYMBOLS: Record<string, string> = {
+  MXN: 'Mex$',
+  ARS: 'AR$',
+  CLP: 'CL$',
+  PEN: 'S/',
+  COP: 'COL$',
+  BOB: 'Bs.',
+};
+
+export const PREFIX_CURRENCY_DISPLAY_CODES = new Set(Object.keys(CURRENCY_DISPLAY_SYMBOLS));
+
+export function currencyDisplaySymbol(currency?: string | null): string {
+  const code = (currency || '').trim().toUpperCase();
+  return CURRENCY_DISPLAY_SYMBOLS[code] || code;
+}
+
+export function formatCurrencyDisplay(
+  value: number | string | null | undefined,
+  currency?: string | null,
+  options: {
+    locale?: string;
+    minimumFractionDigits?: number;
+    maximumFractionDigits?: number;
+    compact?: boolean;
+    showCode?: boolean;
+  } = {},
+): string {
+  const n = typeof value === 'number' ? value : Number(value ?? 0);
+  const safe = Number.isFinite(n) ? n : 0;
+  const code = (currency || '').trim().toUpperCase();
+  const locale = options.locale || getIntlLocale();
+  const min = options.minimumFractionDigits ?? (options.compact ? 0 : 2);
+  const max = options.maximumFractionDigits ?? (options.compact ? 1 : 2);
+  const numFmt = new Intl.NumberFormat(locale, {
+    minimumFractionDigits: min,
+    maximumFractionDigits: max,
+    ...(options.compact ? { notation: 'compact' as const } : {}),
+  });
+
+  if (!/^[A-Z]{3}$/.test(code)) return numFmt.format(safe);
+  if (options.showCode) return `${numFmt.format(safe)} ${code}`;
+  if (PREFIX_CURRENCY_DISPLAY_CODES.has(code)) {
+    return `${currencyDisplaySymbol(code)} ${numFmt.format(safe)}`;
+  }
+
+  try {
+    return new Intl.NumberFormat(locale, {
+      style: 'currency',
+      currency: code,
+      minimumFractionDigits: min,
+      maximumFractionDigits: max,
+      ...(options.compact ? { notation: 'compact' as const } : {}),
+    }).format(safe);
+  } catch {
+    return `${numFmt.format(safe)} ${code}`;
+  }
+}
+
 /**
  * Currency formatter using current locale.
  *
@@ -93,11 +151,10 @@ export function fmtCurrency(value: number | string | null | undefined, currency?
     }).format(safe);
   }
   try {
-    return new Intl.NumberFormat(getIntlLocale(), {
-      style: 'currency',
-      currency: trimmed,
+    return formatCurrencyDisplay(safe, trimmed, {
       maximumFractionDigits: 0,
-    }).format(safe);
+      minimumFractionDigits: 0,
+    });
   } catch {
     return `${safe.toFixed(0)} ${trimmed}`;
   }
@@ -221,9 +278,13 @@ export function formatTemperature(
  */
 export function formatNumber(n: number, currency?: string): string {
   try {
+    if (currency) {
+      return formatCurrencyDisplay(n, currency, {
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 2,
+      });
+    }
     return new Intl.NumberFormat(getIntlLocale(), {
-      style: currency ? 'currency' : 'decimal',
-      currency: currency || undefined,
       minimumFractionDigits: 0,
       maximumFractionDigits: 2,
     }).format(n);

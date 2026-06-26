@@ -13,6 +13,7 @@ import { DateDisplay } from '@/shared/ui/DateDisplay';
 import { apiGet } from '@/shared/lib/api';
 import { getIntlLocale } from '@/shared/lib/formatters';
 import { boqApi, type BOQWithPositions, groupPositionsIntoSections, type SectionGroup } from './api';
+import { fmtWithCurrency } from './boqHelpers';
 import { useToastStore } from '@/stores/useToastStore';
 import { useModuleStore } from '@/stores/useModuleStore';
 import { PresenceAvatars } from '@/modules/collaboration/components/PresenceAvatars';
@@ -56,17 +57,6 @@ const currencyFmt = new Intl.NumberFormat(getIntlLocale(), {
   maximumFractionDigits: 0,
 });
 
-/**
- * Compact money for the stat cards: 1.2M / 340K / 9,500 — always paired
- * with its ISO currency code by the caller (money rule: a figure is never
- * shown without its currency).
- */
-function compactMoney(value: number): string {
-  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
-  if (value >= 1_000) return `${(value / 1_000).toFixed(0)}K`;
-  return currencyFmt.format(value);
-}
-
 /* ── Compare Modal ───────────────────────────────────────────────────── */
 
 interface CompareModalProps {
@@ -79,7 +69,7 @@ interface CompareModalProps {
 
 function fmtDiff(diff: number, currency: string): string {
   const sign = diff >= 0 ? '+' : '';
-  return `${sign}${currencyFmt.format(diff)} ${currency}`;
+  return `${sign}${fmtWithCurrency(Math.abs(diff), getIntlLocale(), currency)}`;
 }
 
 function fmtPct(a: number, b: number): string {
@@ -834,10 +824,7 @@ export function BOQListPage() {
               <div className="mt-1 text-lg font-semibold text-content-primary tabular-nums">&mdash;</div>
             ) : stats.multiCurrency ? (
               <div className="mt-1 text-lg font-semibold text-content-primary tabular-nums">
-                {compactMoney(stats.totalsByCurrency[0]!.total)}
-                <span className="ml-1 text-xs font-medium text-content-tertiary">
-                  {stats.totalsByCurrency[0]!.currency}
-                </span>
+                {fmtWithCurrency(stats.totalsByCurrency[0]!.total, getIntlLocale(), stats.totalsByCurrency[0]!.currency)}
                 <span className="ml-1 text-2xs font-medium text-content-tertiary">
                   {t('boq.plus_n_more', {
                     defaultValue: '+{{count}} more',
@@ -847,10 +834,7 @@ export function BOQListPage() {
               </div>
             ) : (
               <div className="mt-1 text-lg font-semibold text-content-primary tabular-nums">
-                {compactMoney(stats.totalsByCurrency[0]!.total)}
-                <span className="ml-1 text-xs font-medium text-content-tertiary">
-                  {stats.totalsByCurrency[0]!.currency}
-                </span>
+                {fmtWithCurrency(stats.totalsByCurrency[0]!.total, getIntlLocale(), stats.totalsByCurrency[0]!.currency)}
               </div>
             )}
           </div>
@@ -1023,7 +1007,7 @@ export function BOQListPage() {
                     <span className="tabular-nums">{boq.positionCount} {t('boq.positions_short', { defaultValue: 'pos.' })}</span>
                   </div>
                   <div className="mt-1 text-base font-bold text-content-primary tabular-nums">
-                    {currencyFmt.format(boq.grandTotal)} {boq.currency}
+                    {fmtWithCurrency(boq.grandTotal, getIntlLocale(), boq.currency)}
                   </div>
                 </div>
 

@@ -32,7 +32,7 @@ import { Play, Loader2, TrendingUp, AlertTriangle } from 'lucide-react';
 
 import { Button, Card, EmptyState } from '@/shared/ui';
 import { useToastStore } from '@/stores/useToastStore';
-import { getIntlLocale } from '@/shared/lib/formatters';
+import { formatCurrencyDisplay, getIntlLocale } from '@/shared/lib/formatters';
 
 import {
   simulateRisk,
@@ -56,12 +56,10 @@ function fmtCurrencyOrPlain(n: number | null, currency: string): string {
   const safe = /^[A-Z]{3}$/.test(currency) ? currency : '';
   try {
     if (safe) {
-      return new Intl.NumberFormat(getIntlLocale(), {
-        style: 'currency',
-        currency: safe,
+      return formatCurrencyDisplay(n, safe, {
         minimumFractionDigits: 0,
         maximumFractionDigits: 0,
-      }).format(n);
+      });
     }
     // No currency known — render a bare number with locale grouping.
     return new Intl.NumberFormat(getIntlLocale(), {

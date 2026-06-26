@@ -17,13 +17,14 @@ import {
 } from './data/benchmarks';
 import { useProjectBenchmarkData } from './hooks/useProjectBenchmarkData';
 import { fetchOwnPortfolio, type BenchmarkResponse } from './api';
+import { formatCurrencyDisplay } from '@/shared/lib/formatters';
 
 /* ── Helpers ───────────────────────────────────────────────────────── */
 
 function formatCurrency(value: number, currency: string): string {
-  return value.toLocaleString('en', {
-    style: 'currency',
-    currency,
+  return formatCurrencyDisplay(value, currency, {
+    locale: 'en',
+    minimumFractionDigits: 0,
     maximumFractionDigits: 0,
   });
 }

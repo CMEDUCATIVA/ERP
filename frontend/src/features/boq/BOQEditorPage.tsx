@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 // lucide-react icons used by sub-components (BOQToolbar, BOQGrid, etc.) — none needed directly here
-import { Database, Download, ExternalLink, X, Sparkles, AlertTriangle as WarnTriangle, Lock, Copy, Wallet, Keyboard, GitCompare, RefreshCw, ShieldCheck, FlaskConical, Send, Percent } from 'lucide-react';
+import { Database, Download, ExternalLink, FileDown, X, Sparkles, AlertTriangle as WarnTriangle, Lock, Copy, Wallet, Keyboard, GitCompare, RefreshCw, ShieldCheck, FlaskConical, Send, Percent } from 'lucide-react';
 import { Button, Badge, Breadcrumb, ModuleHelpButton, ModuleGuideButton, ConfirmDialog, DismissibleInfo, IntroRichText } from '@/shared/ui';
 import { useConfirm } from '@/shared/hooks/useConfirm';
 import { useProgressStore } from '@/shared/ui/GlobalProgress';
@@ -1996,6 +1996,7 @@ export function BOQEditorPage() {
   const [showVersionHistory, setShowVersionHistory] = useState(false);
   const [exportWarning, setExportWarning] = useState<{ format: 'excel' | 'csv' | 'pdf' | 'gaeb'; score: number } | null>(null);
   const [gaebPreviewOpen, setGaebPreviewOpen] = useState(false);
+  const [pdfLayoutOpen, setPdfLayoutOpen] = useState(false);
 
   /* ── Computed data ─────────────────────────────────────────────────── */
 
@@ -2272,7 +2273,7 @@ export function BOQEditorPage() {
   const grossTotalDisplay = displayCurrencyMeta
     ? grossTotal / displayCurrencyMeta.rate
     : grossTotal;
-  const displaySymbol = displayCurrencyMeta ? displayCurrencyMeta.currency : currencySymbol;
+  const displaySymbol = displayCurrencyMeta ? getCurrencySymbol(displayCurrencyMeta.currency) : currencySymbol;
 
   /* ── Quality score ───────────────────────────────────────────────── */
 
@@ -2869,6 +2870,8 @@ export function BOQEditorPage() {
             vatAmount,
             grossTotal,
             locale,
+            includeResources: pdfLayoutRef.current !== 'vertical',
+            landscape: pdfLayoutRef.current === 'horizontal',
           });
           addToast({ type: 'success', title: t('boq.file_downloaded', { defaultValue: 'File downloaded' }) });
           return;
@@ -2912,6 +2915,11 @@ export function BOQEditorPage() {
         setGaebPreviewOpen(true);
         return;
       }
+      // Show PDF layout dialog before export
+      if (format === 'pdf') {
+        setPdfLayoutOpen(true);
+        return;
+      }
       const score = qualityBreakdown.score;
       if (score < 60) {
         setExportWarning({ format, score });
@@ -2934,6 +2942,24 @@ export function BOQEditorPage() {
       doExport('gaeb');
     }
   }, [qualityBreakdown.score, doExport]);
+
+  /** Store PDF layout choice before export. */
+  const pdfLayoutRef = useRef<'vertical' | 'horizontal' | 'default'>('default');
+  const [pdfLayoutDraft, setPdfLayoutDraft] = useState<'vertical' | 'horizontal' | 'default'>('default');
+
+  const handlePdfLayoutConfirm = useCallback(
+    (layout: 'vertical' | 'horizontal' | 'default') => {
+      setPdfLayoutOpen(false);
+      pdfLayoutRef.current = layout;
+      const score = qualityBreakdown.score;
+      if (score < 60) {
+        setExportWarning({ format: 'pdf', score });
+      } else {
+        doExport('pdf');
+      }
+    },
+    [qualityBreakdown.score, doExport],
+  );
 
   const [isValidating, setIsValidating] = useState(false);
   const [lastValidationScore, setLastValidationScore] = useState<number | null>(null);
@@ -5010,6 +5036,48 @@ export function BOQEditorPage() {
           }}
           t={t}
         />
+      )}
+
+      {/* ── PDF Layout Dialog ──────────────────────────────────────── */}
+      {pdfLayoutOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-lg animate-fade-in" onClick={() => setPdfLayoutOpen(false)}>
+          <div role="dialog" aria-modal="true" className="w-full max-w-sm mx-4 rounded-2xl bg-surface-primary shadow-2xl border border-border-light overflow-hidden animate-scale-in" onClick={(e) => e.stopPropagation()}>
+            <div className="px-6 py-5">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="h-10 w-10 rounded-xl bg-oe-blue/10 flex items-center justify-center">
+                  <FileDown size={20} className="text-oe-blue" />
+                </div>
+                <div>
+                  <h3 className="text-base font-semibold">{t('boq.pdf_layout_title', { defaultValue: 'PDF Export Layout' })}</h3>
+                  <p className="text-xs text-content-tertiary">{t('boq.pdf_layout_desc', { defaultValue: 'Choose how the BOQ is laid out in the PDF' })}</p>
+                </div>
+              </div>
+              <div className="space-y-2 mb-4">
+                {(['vertical', 'horizontal', 'default'] as const).map((layout) => (
+                  <label key={layout} className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-colors ${pdfLayoutDraft === layout ? 'border-oe-blue bg-oe-blue/5' : 'border-border-light hover:bg-surface-secondary/50'}`}>
+                    <input type="radio" name="pdfLayout" checked={pdfLayoutDraft === layout} onChange={() => setPdfLayoutDraft(layout)} className="mt-0.5" />
+                    <div className="text-sm">
+                      <span className="font-medium text-content-primary">
+                        {layout === 'vertical' ? t('boq.pdf_layout_vertical', { defaultValue: 'Resumen (Vertical)' }) : layout === 'horizontal' ? t('boq.pdf_layout_horizontal', { defaultValue: 'Completo (Horizontal)' }) : t('boq.pdf_layout_default', { defaultValue: 'Por defecto' })}
+                      </span>
+                      <p className="text-content-tertiary text-xs mt-0.5">
+                        {layout === 'vertical' ? t('boq.pdf_layout_vertical_desc', { defaultValue: 'Solo partidas, cantidades, precios y totales' }) : layout === 'horizontal' ? t('boq.pdf_layout_horizontal_desc', { defaultValue: 'Formato apaisado con desglose de recursos' }) : t('boq.pdf_layout_default_desc', { defaultValue: 'Formato actual sin cambios' })}
+                      </p>
+                    </div>
+                  </label>
+                ))}
+              </div>
+              <div className="flex gap-2 justify-end">
+                <button onClick={() => setPdfLayoutOpen(false)} className="inline-flex items-center justify-center font-medium whitespace-nowrap select-none transition-all h-9 px-4 text-sm gap-1.5 rounded-lg bg-surface-primary text-content-primary border border-border hover:bg-surface-secondary">
+                  {t('common.cancel', { defaultValue: 'Cancel' })}
+                </button>
+                <button onClick={() => handlePdfLayoutConfirm(pdfLayoutDraft)} className="inline-flex items-center justify-center font-medium whitespace-nowrap select-none transition-all h-9 px-4 text-sm gap-1.5 rounded-lg bg-oe-blue text-white hover:bg-oe-blue-hover">
+                  {t('common.export', { defaultValue: 'Export' })}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* ── Update Rates Confirmation Dialog ────────────────────────── */}

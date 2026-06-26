@@ -39,6 +39,7 @@ import {
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { payrollGuide } from './payrollGuide';
 import { RequiresProject } from '@/shared/auth/RequiresProject';
+import { formatCurrencyDisplay } from '@/shared/lib/formatters';
 import { useToastStore } from '@/stores/useToastStore';
 import { useProjectContextStore } from '@/stores/useProjectContextStore';
 import { getErrorMessage } from '@/shared/lib/api';
@@ -71,16 +72,10 @@ import type {
 function money(value: string | number, currency?: string): string {
   const n = typeof value === 'number' ? value : Number(value);
   if (!Number.isFinite(n)) return String(value);
-  try {
-    return new Intl.NumberFormat(undefined, {
-      style: currency ? 'currency' : 'decimal',
-      currency: currency || undefined,
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(n);
-  } catch {
-    return n.toFixed(2);
-  }
+  return formatCurrencyDisplay(n, currency, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
 }
 
 function hours(value: string): string {

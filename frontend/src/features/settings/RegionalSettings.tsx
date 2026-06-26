@@ -9,7 +9,7 @@
 import { useState, useMemo, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Globe, Ruler, FileText, Calendar, Hash, DollarSign, Search, Check } from 'lucide-react';
+import { Globe, Ruler, FileText, Calendar, Hash, DollarSign, Search, Check, Tag, Plus, X } from 'lucide-react';
 import clsx from 'clsx';
 import { Card, CardHeader, CardContent } from '@/shared/ui';
 import { apiGet, apiPatch } from '@/shared/lib/api';
@@ -405,6 +405,24 @@ export function RegionalSettings({ animationDelay = '0ms' }: { animationDelay?: 
     [],
   );
 
+  // Custom assembly categories
+  const [newCat, setNewCat] = useState('');
+  const customCats = usePreferencesStore((s) => s.customAssemblyCategories);
+
+  const addCustomCat = useCallback(() => {
+    const trimmed = newCat.trim();
+    if (!trimmed || customCats.includes(trimmed)) return;
+    usePreferencesStore.getState().setPreference('customAssemblyCategories', [...customCats, trimmed]);
+    setNewCat('');
+  }, [newCat, customCats]);
+
+  const removeCustomCat = useCallback((cat: string) => {
+    usePreferencesStore.getState().setPreference(
+      'customAssemblyCategories',
+      customCats.filter((c) => c !== cat),
+    );
+  }, [customCats]);
+
   return (
     <Card className="animate-card-in" style={{ animationDelay }}>
       <CardHeader
@@ -513,6 +531,90 @@ export function RegionalSettings({ animationDelay = '0ms' }: { animationDelay?: 
               onChange={(val) => handleChange('currency_code', val)}
               placeholder={t('common.search', { defaultValue: 'Search...' })}
             />
+          </div>
+
+          {/* Custom Assembly Categories */}
+          <div>
+            <label className="flex items-center gap-2 text-sm font-medium text-content-primary mb-1.5">
+              <Tag size={14} className="text-content-tertiary" />
+              Categorías de partidas
+            </label>
+            <div className="space-y-2">
+              {/* CAPECO — read only */}
+              <details className="rounded-lg border border-border-light bg-surface-secondary/30 px-3 py-2">
+                <summary className="text-2xs font-medium text-content-tertiary cursor-pointer select-none">
+                  16 categorías estándar
+                </summary>
+                <div className="mt-1.5 grid grid-cols-2 gap-x-2 gap-y-0 text-2xs">
+                  {[
+                    '01 — Obras Provisionales',
+                    '02 — Movimiento de Tierras',
+                    '03 — Concreto Simple',
+                    '04 — Obras de Concreto Armado',
+                    '05 — Albañilería',
+                    '06 — Revoques y Enlucidos',
+                    '07 — Pisos y Pavimentos',
+                    '08 — Coberturas',
+                    '09 — Carpintería de Madera',
+                    '10 — Carpintería Metálica',
+                    '11 — Cerrajería',
+                    '12 — Vidrios y Cristales',
+                    '13 — Pintura',
+                    '14 — Instalaciones Sanitarias',
+                    '15 — Instalaciones Eléctricas',
+                    '16 — Obras Complementarias',
+                  ].map((cat) => (
+                    <div key={cat} className="text-content-quaternary">{cat}</div>
+                  ))}
+                </div>
+              </details>
+              {/* Custom categories */}
+              <div className="rounded-lg border border-border-light bg-surface-elevated px-3 py-2">
+                <div className="text-2xs font-medium text-content-tertiary mb-2">
+                  Personalizadas ({customCats.length})
+                </div>
+                {customCats.length === 0 ? (
+                  <div className="text-xs text-content-quaternary italic">
+                    Sin categorías personalizadas. Agregue una abajo.
+                  </div>
+                ) : (
+                  <div className="space-y-1 mb-2">
+                    {customCats.map((cat, i) => (
+                      <div key={cat} className="flex items-center justify-between gap-2 text-xs text-content-secondary">
+                        <span className="font-mono text-2xs text-content-quaternary w-6 shrink-0">{17 + i}</span>
+                        <span className="truncate flex-1">{cat}</span>
+                        <button
+                          onClick={() => removeCustomCat(cat)}
+                          className="shrink-0 flex h-5 w-5 items-center justify-center rounded text-content-quaternary hover:text-red-500 hover:bg-red-50 transition-colors"
+                          aria-label={`Eliminar ${cat}`}
+                        >
+                          <X size={12} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={newCat}
+                    onChange={(e) => setNewCat(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') addCustomCat(); }}
+                    placeholder="Nueva categoría..."
+                    maxLength={80}
+                    className="flex-1 h-8 rounded-lg border border-border bg-surface-primary px-2.5 text-xs focus:outline-none focus:ring-1 focus:ring-oe-blue/30"
+                  />
+                  <button
+                    onClick={addCustomCat}
+                    disabled={!newCat.trim()}
+                    className="inline-flex items-center gap-1 rounded-lg bg-oe-blue text-white px-2.5 py-1 text-xs font-medium disabled:opacity-40 hover:bg-oe-blue-hover transition-colors"
+                  >
+                    <Plus size={12} />
+                    Agregar
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </CardContent>

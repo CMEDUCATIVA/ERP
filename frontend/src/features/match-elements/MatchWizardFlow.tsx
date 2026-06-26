@@ -58,6 +58,7 @@ import { Card } from '@/shared/ui/Card';
 import { BIMModelPicker } from '@/shared/ui/BIMModelPicker';
 import { DismissibleInfo, Breadcrumb, ModuleGuideButton } from '@/shared/ui';
 import { PageHeader } from '@/shared/ui/PageHeader';
+import { formatCurrencyDisplay } from '@/shared/lib/formatters';
 
 import {
   matchElementsApi,
@@ -194,15 +195,9 @@ const STAGE_INDEX: Record<StageId, number> = STAGES.reduce(
 
 function fmtMoney(value: number | null | undefined, currency: string | null | undefined) {
   if (value == null) return '—';
-  try {
-    return new Intl.NumberFormat(undefined, {
-      style: currency ? 'currency' : 'decimal',
-      currency: currency || undefined,
-      maximumFractionDigits: 2,
-    }).format(value);
-  } catch {
-    return `${value.toFixed(2)} ${currency ?? ''}`.trim();
-  }
+  return formatCurrencyDisplay(value, currency, {
+    maximumFractionDigits: 2,
+  });
 }
 
 function StageRail({

@@ -146,9 +146,15 @@ def _assembly_to_response(
     usage_count: int = 0,
 ) -> AssemblyResponse:
     """Convert an Assembly ORM model to an AssemblyResponse schema."""
-    components = getattr(assembly, "components", None) or []
     metadata = getattr(assembly, "metadata_", {}) or {}
     tags: list[str] = metadata.get("tags", []) if isinstance(metadata, dict) else []
+    state = getattr(assembly, "__dict__", {})
+    component_count = 0
+    if isinstance(state, dict):
+        if "component_count" in state:
+            component_count = int(state.get("component_count") or 0)
+        elif isinstance(state.get("components"), list):
+            component_count = len(state["components"])
     return AssemblyResponse(
         id=assembly.id,  # type: ignore[attr-defined]
         code=assembly.code,  # type: ignore[attr-defined]
@@ -165,7 +171,7 @@ def _assembly_to_response(
         project_id=assembly.project_id,  # type: ignore[attr-defined]
         owner_id=assembly.owner_id,  # type: ignore[attr-defined]
         is_active=assembly.is_active,  # type: ignore[attr-defined]
-        component_count=len(components),
+        component_count=component_count,
         usage_count=usage_count,
         tags=tags,
         metadata=metadata,

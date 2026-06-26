@@ -35,7 +35,7 @@ import {
 } from '@/shared/ui/WideModal';
 import { useConfirm } from '@/shared/hooks/useConfirm';
 import { apiGet, apiPost, apiDelete } from '@/shared/lib/api';
-import { getIntlLocale } from '@/shared/lib/formatters';
+import { formatCurrencyDisplay, getIntlLocale } from '@/shared/lib/formatters';
 import { useToastStore } from '@/stores/useToastStore';
 import { useProjectContextStore } from '@/stores/useProjectContextStore';
 import { useAuthStore } from '@/stores/useAuthStore';
@@ -208,14 +208,7 @@ function formatCurrency(amount: number, currency?: string): string {
       maximumFractionDigits: 2,
     }).format(safe);
   }
-  try {
-    return new Intl.NumberFormat(getIntlLocale(), {
-      style: 'currency',
-      currency: code,
-    }).format(safe);
-  } catch {
-    return `${safe.toFixed(2)} ${code}`;
-  }
+  return formatCurrencyDisplay(safe, code);
 }
 
 /**

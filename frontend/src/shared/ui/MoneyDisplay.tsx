@@ -2,6 +2,7 @@ import clsx from 'clsx';
 import { useRef } from 'react';
 import { usePreferencesStore } from '../../stores/usePreferencesStore';
 import { currencyMinorUnits } from './currencyMinorUnits';
+import { formatCurrencyDisplay } from '../lib/formatters';
 
 export interface MoneyDisplayProps {
   amount: number | string | null | undefined;
@@ -117,26 +118,13 @@ export function MoneyDisplay({
 
   let formatted: string;
   try {
-    if (showCode) {
-      // Format number without currency, then append ISO code
-      const numFmt = new Intl.NumberFormat(numberLocale, {
-        minimumFractionDigits: compact ? 0 : minorUnits,
-        maximumFractionDigits: compact ? 1 : minorUnits,
-        ...(compact ? { notation: 'compact' as const } : {}),
-      });
-      formatted = `${numFmt.format(numericValue)} ${safeCurrency}`;
-    } else {
-      const opts: Intl.NumberFormatOptions = {
-        style: 'currency',
-        currency: safeCurrency,
-        minimumFractionDigits: compact ? 0 : minorUnits,
-        maximumFractionDigits: compact ? 1 : minorUnits,
-      };
-      if (compact) {
-        opts.notation = 'compact';
-      }
-      formatted = new Intl.NumberFormat(numberLocale, opts).format(numericValue);
-    }
+    formatted = formatCurrencyDisplay(numericValue, safeCurrency, {
+      locale: numberLocale,
+      minimumFractionDigits: compact ? 0 : minorUnits,
+      maximumFractionDigits: compact ? 1 : minorUnits,
+      compact,
+      showCode,
+    });
   } catch {
     // numericValue is guaranteed numeric (parseFloat above) but be paranoid
     // — Number.isFinite guards against ±Infinity sneaking past the NaN gate.
