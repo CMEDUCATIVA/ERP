@@ -219,7 +219,8 @@ export function CategoryCombobox({
       case 'Enter':
         e.preventDefault();
         if (activeIndex >= 0 && activeIndex < filtered.length) {
-          select(filtered[activeIndex]);
+          const activeCategory = filtered[activeIndex];
+          if (activeCategory) select(activeCategory);
         } else if (canCreate && activeIndex === filtered.length) {
           handleCreate();
         } else if (canCreate) {

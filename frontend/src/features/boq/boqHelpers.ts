@@ -743,7 +743,7 @@ export interface Tip {
 }
 
 /** Resolve a human-readable label for a unit abbreviation (e.g. "m2" → "metro cuadrado"). */
-export function getUnitLabel(unit: string, t?: (key: string, opts?: Record<string, string>) => string): string {
+export function getUnitLabel(unit: string, t?: (key: string, opts?: Record<string, unknown>) => string): string {
   return unitLabel(unit, t);
 }
 

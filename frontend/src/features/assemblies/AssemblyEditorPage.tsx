@@ -33,6 +33,7 @@ import { useToastStore } from '@/stores/useToastStore';
 import {
   assembliesApi,
   type AssemblyComponent,
+  type AssemblyWithComponents,
   type ComponentMetadata,
   type CreateComponentData,
   type ResourceType,
@@ -407,15 +408,18 @@ export function AssemblyEditorPage() {
     );
   }
 
-  const components = assembly?.components ?? (queryClient.getQueryData(['assembly', assemblyId]) as any)?.components ?? [];
-  const computedTotal = components.reduce((sum, c) => sum + (TAX_UNITS.includes(c.unit) ? 0 : c.total), 0);
+  const cachedAssembly = queryClient.getQueryData<AssemblyWithComponents>(['assembly', assemblyId]);
+  const currentAssembly = assembly ?? cachedAssembly;
+  if (!currentAssembly) return null;
+  const components: AssemblyComponent[] = currentAssembly.components ?? [];
+  const computedTotal = components.reduce((sum: number, c: AssemblyComponent) => sum + (TAX_UNITS.includes(c.unit) ? 0 : c.total), 0);
   // Prefer the server-persisted total_rate for the headline figure: it already
   // reflects the bid factor AND any per-type typed-formula adjustments
   // (waste / burden / fuel) that the naive client-side sum does not mirror.
   // Fall back to the local sum only when the server hasn't rolled up a rate
   // yet (e.g. a freshly created assembly with no persisted total).
-  const localAdjustedTotal = computedTotal * (assembly?.bid_factor ?? 1);
-  const adjustedTotal = (assembly?.total_rate ?? 0) > 0 ? (assembly?.total_rate ?? 0) : localAdjustedTotal;
+  const localAdjustedTotal = computedTotal * (currentAssembly.bid_factor ?? 1);
+  const adjustedTotal = (currentAssembly.total_rate ?? 0) > 0 ? (currentAssembly.total_rate ?? 0) : localAdjustedTotal;
   const getComponentSection = (component: AssemblyComponent) => {
     if (component.unit === '%MO') return 'equipment';
     if (TAX_UNITS.includes(component.unit)) return 'tax';
@@ -445,12 +449,12 @@ export function AssemblyEditorPage() {
     .reduce((sum, component) => sum + component.total, 0);
   const hasTools = components.some((component) => component.unit === '%MO');
   const productivity =
-    Number(assembly.metadata?.productivity ?? assembly.metadata?.rendimiento) || 25;
+    Number(currentAssembly.metadata?.productivity ?? currentAssembly.metadata?.rendimiento) || 25;
   const handleProductivityCommit = (value: string) => {
     const next = Number(value);
     if (!Number.isFinite(next) || next <= 0) return;
     assemblyMetadataMutation.mutate({
-      ...(assembly.metadata ?? {}),
+      ...(currentAssembly.metadata ?? {}),
       productivity: next,
     });
   };
@@ -512,7 +516,7 @@ export function AssemblyEditorPage() {
       <Breadcrumb
         items={[
           { label: t('nav.assemblies', 'Assemblies'), to: '/assemblies' },
-          { label: assembly.name },
+          { label: currentAssembly.name },
         ]}
       />
 
@@ -535,26 +539,26 @@ export function AssemblyEditorPage() {
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-bold text-content-primary truncate">
-              {assembly.name}
+              {currentAssembly.name}
             </h1>
             <Badge variant="blue" size="md">
-              {assembly.code}
+              {currentAssembly.code}
             </Badge>
           </div>
           <div className="mt-2 flex flex-wrap items-center gap-3 text-sm text-content-secondary">
-            {assembly.category && (
-              <span className="capitalize">{assembly.category}</span>
+            {currentAssembly.category && (
+              <span className="capitalize">{currentAssembly.category}</span>
             )}
             <span className="text-content-tertiary">/</span>
-            <span>{assembly.unit}</span>
+            <span>{currentAssembly.unit}</span>
             <span className="text-content-tertiary">/</span>
-            <span>{assembly.currency || 'EUR'}</span>
-            {assembly.bid_factor !== 1.0 && (
+            <span>{currentAssembly.currency || 'EUR'}</span>
+            {currentAssembly.bid_factor !== 1.0 && (
               <>
                 <span className="text-content-tertiary">/</span>
                 <span>
                   {t('assemblies.bid_factor', { defaultValue: 'Bid Factor' })}:{' '}
-                  <strong className="text-content-primary">{assembly.bid_factor}</strong>
+                  <strong className="text-content-primary">{currentAssembly.bid_factor}</strong>
                 </span>
               </>
             )}
@@ -722,7 +726,7 @@ export function AssemblyEditorPage() {
         <Card>
           <div className="flex items-center gap-2 flex-wrap">
             <Tag size={14} className="text-violet-500 shrink-0" />
-            {(assembly.tags ?? []).map((tag) => (
+            {(currentAssembly.tags ?? []).map((tag) => (
               <Badge
                 key={tag}
                 variant="neutral"
@@ -879,7 +883,6 @@ export function AssemblyEditorPage() {
                     })
                   }
                   onDelete={() => deleteComponentMutation.mutate(component.id)}
-                  fmt={fmt}
                     />
                   );
                 })
@@ -904,7 +907,7 @@ export function AssemblyEditorPage() {
             </tbody>
             {components.length > 0 && (
               <tfoot>
-                {assembly.bid_factor !== 1.0 && (
+                {currentAssembly.bid_factor !== 1.0 && (
                   <tr className="border-t border-border-light bg-surface-tertiary/50">
                     <td colSpan={8} className="px-4 py-2.5 text-right text-sm text-content-secondary">
                       {t('assemblies.subtotal', { defaultValue: 'Subtotal' })}
@@ -915,13 +918,13 @@ export function AssemblyEditorPage() {
                     <td />
                   </tr>
                 )}
-                {assembly.bid_factor !== 1.0 && (
+                {currentAssembly.bid_factor !== 1.0 && (
                   <tr className="border-t border-border-light bg-surface-tertiary/50">
                     <td colSpan={8} className="px-4 py-2.5 text-right text-sm text-content-secondary">
-                      {t('assemblies.bid_factor', { defaultValue: 'Bid Factor' })} ({assembly.bid_factor})
+                      {t('assemblies.bid_factor', { defaultValue: 'Bid Factor' })} ({currentAssembly.bid_factor})
                     </td>
                     <td className="px-4 py-2.5 text-right text-sm text-content-secondary tabular-nums">
-                      x {assembly.bid_factor}
+                      x {currentAssembly.bid_factor}
                     </td>
                     <td />
                   </tr>
@@ -933,7 +936,7 @@ export function AssemblyEditorPage() {
                   <td className="px-4 py-3 text-right text-content-primary text-base tabular-nums">
                     {Number(adjustedTotal).toFixed(2)}
                     <span className="ml-1 text-xs font-normal text-content-tertiary">
-                      / {assembly.unit}
+                      / {currentAssembly.unit}
                     </span>
                   </td>
                   <td />
@@ -948,9 +951,9 @@ export function AssemblyEditorPage() {
       <BreakdownSidebar
         breakdown={breakdown}
         components={components}
-        currency={assembly.currency}
-        unit={assembly.unit}
-        bidFactor={assembly.bid_factor}
+        currency={currentAssembly.currency}
+        unit={currentAssembly.unit}
+        bidFactor={currentAssembly.bid_factor}
         productivity={productivity}
         onProductivityCommit={handleProductivityCommit}
         theoreticalHoursPerUnit={theoreticalHoursPerUnit}
@@ -978,8 +981,8 @@ export function AssemblyEditorPage() {
       {applyModalOpen && (
         <ApplyToBOQModal
           assemblyId={assemblyId!}
-          assemblyName={assembly.name}
-          regionalFactors={assembly.regional_factors}
+          assemblyName={currentAssembly.name}
+          regionalFactors={currentAssembly.regional_factors}
           onClose={() => setApplyModalOpen(false)}
         />
       )}
@@ -1242,7 +1245,6 @@ function ComponentRow({
   onDragLeave,
   onUpdate,
   onDelete,
-  fmt,
 }: {
   component: AssemblyComponent;
   isDragOver: boolean;
@@ -1252,7 +1254,6 @@ function ComponentRow({
   onDragLeave: () => void;
   onUpdate: (data: Partial<CreateComponentData>) => void;
   onDelete: () => void;
-  fmt: (n: number) => string;
 }) {
   const { t } = useTranslation();
   const { confirm, ...confirmProps } = useConfirm();
@@ -1264,8 +1265,6 @@ function ComponentRow({
   const [imageModal, setImageModal] = useState<string | null>(null);
 
   const isTools = component.unit === '%MO';
-  const isTax = component.unit === '%ST';
-  const isSpecial = isTools || isTax;
   const handleBlur = (field: string, value: string) => {
     setEditing(null);
     const numFields = ['factor', 'quantity', 'unit_cost'];
@@ -1309,7 +1308,6 @@ function ComponentRow({
   const liveDescription = (meta.description as string | undefined) ?? '';
   const liveImages = (meta.images as Array<{ name: string; dataUrl: string }> | undefined) ?? [];
   const liveDatasheets = (meta.datasheets as Array<{ name: string; dataUrl: string }> | undefined) ?? [];
-  const liveCurrency = ((meta._catalog_currency as string | undefined) ?? 'PEN');
   const crewEditable = resType === 'labor' || resType === 'operator' || resType === 'equipment';
   const crewRaw = Number(meta.crew_size ?? (crewEditable ? '' : NaN));
   const crewDisplay = crewEditable ? (Number.isFinite(crewRaw) ? crewRaw.toFixed(4) : '') : '-';
@@ -1318,8 +1316,6 @@ function ComponentRow({
     'px-4 py-2.5 transition-colors cursor-text hover:bg-oe-blue-subtle/50';
   const inputClass =
     'w-full bg-transparent border-none outline-none focus:ring-0 p-0 text-sm';
-  const priceValue = (value: number | undefined) =>
-    value != null ? `${Number(value).toFixed(2)} ${liveCurrency}` : '-';
   const mediaFields = (
     <>
       {liveImages.length > 0 && (
@@ -1440,7 +1436,7 @@ function ComponentRow({
             field="crew_size"
             editing={editing}
             setEditing={setEditing}
-            onBlur={(field, value) => {
+            onBlur={(_field, value) => {
               setEditing(null);
               patchMeta('crew_size', value);
             }}
@@ -1839,27 +1835,6 @@ function DetailField({
       />
       {hint && <div className="text-[10px] text-content-tertiary mt-1">{hint}</div>}
     </label>
-  );
-}
-
-function ReadOnlyField({
-  label,
-  value,
-  span,
-}: {
-  label: string;
-  value: string;
-  span?: string;
-}) {
-  return (
-    <div className={clsx('block', span)}>
-      <div className="text-[10px] uppercase tracking-wider text-content-tertiary font-semibold mb-1">
-        {label}
-      </div>
-      <div className="w-full rounded-md border border-border-light bg-surface-tertiary px-2 py-1 text-sm text-content-secondary tabular-nums">
-        {value}
-      </div>
-    </div>
   );
 }
 
@@ -2528,19 +2503,20 @@ function CatalogResourcePickerModal({
     mutationFn: async (item: CatalogResourceItem) => {
       setAdding(item.id);
       try {
+        const resourceType = (item.resource_type || 'material') as ResourceType;
         if (onAddComponent) {
           const specs = item.specifications ?? {};
           await onAddComponent({
             catalog_resource_id: item.id,
             description: item.name,
-            resource_type: (item.resource_type as ResourceType) || 'material',
+            resource_type: resourceType,
             factor: 1,
             quantity: 1,
             unit: item.unit || 'pcs',
             unit_cost: item.base_price || 0,
             metadata: {
               ...specs,
-              resource_type: item.resource_type,
+              resource_type: resourceType,
               category: item.category,
               _catalog_base_price: item.base_price,
               _catalog_min_price: item.min_price,
@@ -2556,14 +2532,14 @@ function CatalogResourcePickerModal({
         await assembliesApi.addComponent(assemblyId, {
           catalog_resource_id: item.id,
           description: item.name,
-          resource_type: (item.resource_type as ResourceType) || 'material',
+          resource_type: resourceType,
           factor: 1,
           quantity: 1,
           unit: item.unit || 'pcs',
           unit_cost: item.base_price || 0,
           metadata: {
             ...specs,
-            resource_type: item.resource_type,
+            resource_type: resourceType,
             category: item.category,
             _catalog_base_price: item.base_price,
             _catalog_min_price: item.min_price,

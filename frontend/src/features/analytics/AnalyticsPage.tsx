@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { apiGet } from '@/shared/lib/api';
-import { fmtCurrency, fmtNumber, formatCurrencyDisplay, getIntlLocale } from '@/shared/lib/formatters';
+import { fmtCurrency, fmtNumber, formatCurrencyDisplay } from '@/shared/lib/formatters';
 import {
   FolderOpen,
   DollarSign,

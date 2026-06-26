@@ -3049,7 +3049,6 @@ function ResourceFormModal({
   resource,
   onClose,
   onSaved,
-  customCount,
 }: {
   resource?: CatalogResource;
   onClose: () => void;
@@ -3057,6 +3056,7 @@ function ResourceFormModal({
   customCount?: number;
 }) {
   const { t } = useTranslation();
+  const queryClient = useQueryClient();
   const addToast = useToastStore((s) => s.addToast);
   const rawPreferredCurrency = usePreferencesStore((s) => s.currency);
   const setPreference = usePreferencesStore((s) => s.setPreference);
@@ -3105,29 +3105,30 @@ function ResourceFormModal({
   const [datasheets, setDatasheets] = useState<{ name: string; dataUrl: string }[]>(
     (specsObj.datasheets as { name: string; dataUrl: string }[]) ?? []
   );
-  const [wastePct, setWastePct] = useState<number>(
-    (specsObj.waste_pct as number) ?? '' as unknown as number
+  type NumericInput = number | '';
+  const [wastePct, setWastePct] = useState<NumericInput>(
+    (specsObj.waste_pct as number | undefined) ?? ''
   );
   const [laborRole, setLaborRole] = useState<string>(
     (specsObj.labor_role as string) ?? ''
   );
-  const [dailyWage, setDailyWage] = useState<number>(
-    (specsObj.daily_wage as number) ?? '' as unknown as number
+  const [dailyWage, setDailyWage] = useState<NumericInput>(
+    (specsObj.daily_wage as number | undefined) ?? ''
   );
-  const [burdenPct, setBurdenPct] = useState<number>(
-    (specsObj.burden_pct as number) ?? '' as unknown as number
+  const [burdenPct, setBurdenPct] = useState<NumericInput>(
+    (specsObj.burden_pct as number | undefined) ?? ''
   );
-  const [fuelCostPerHour, setFuelCostPerHour] = useState<number>(
-    (specsObj.fuel_cost_per_hour as number) ?? '' as unknown as number
+  const [fuelCostPerHour, setFuelCostPerHour] = useState<NumericInput>(
+    (specsObj.fuel_cost_per_hour as number | undefined) ?? ''
   );
-  const [acquisitionValue, setAcquisitionValue] = useState<number>(
-    (specsObj.acquisition_value as number) ?? '' as unknown as number
+  const [acquisitionValue, setAcquisitionValue] = useState<NumericInput>(
+    (specsObj.acquisition_value as number | undefined) ?? ''
   );
-  const [usefulLifeYears, setUsefulLifeYears] = useState<number>(
-    (specsObj.useful_life_years as number) ?? '' as unknown as number
+  const [usefulLifeYears, setUsefulLifeYears] = useState<NumericInput>(
+    (specsObj.useful_life_years as number | undefined) ?? ''
   );
-  const [maintenancePct, setMaintenancePct] = useState<number>(
-    (specsObj.maintenance_pct as number) ?? '' as unknown as number
+  const [maintenancePct, setMaintenancePct] = useState<NumericInput>(
+    (specsObj.maintenance_pct as number | undefined) ?? ''
   );
   const [currencyQuery, setCurrencyQuery] = useState('');
   const [currencyOpen, setCurrencyOpen] = useState(false);
@@ -3470,7 +3471,7 @@ function ResourceFormModal({
               <div className="flex items-center gap-2">
                 <input type="number" min="0" max="100" step="0.5"
                   value={wastePct === '' || wastePct === null || wastePct === undefined ? '' : wastePct}
-                  onChange={(e) => setWastePct(e.target.value === '' ? '' as unknown as number : Number(e.target.value))}
+                  onChange={(e) => setWastePct(e.target.value === '' ? '' : Number(e.target.value))}
                   placeholder="Personalizado"
                   className="h-8 w-20 rounded-lg border border-border bg-surface-primary px-2 text-xs text-right focus:outline-none focus:ring-2 focus:ring-oe-blue"
                 />
@@ -3498,7 +3499,7 @@ function ResourceFormModal({
                   <label className="text-xs font-medium text-content-secondary mb-1 block">Jornal diario (S/)</label>
                   <input type="number" step="0.01" min="0"
                     value={dailyWage === '' || dailyWage === null || dailyWage === undefined ? '' : dailyWage}
-                    onChange={(e) => setDailyWage(e.target.value === '' ? '' as unknown as number : Number(e.target.value))}
+                    onChange={(e) => setDailyWage(e.target.value === '' ? '' : Number(e.target.value))}
                     placeholder="65.00"
                     className="h-9 w-full rounded-lg border border-border bg-surface-primary px-3 text-sm text-right focus:outline-none focus:ring-2 focus:ring-oe-blue"
                   />
@@ -3509,13 +3510,13 @@ function ResourceFormModal({
                   </label>
                   <input type="number" step="0.5" min="0" max="200"
                     value={burdenPct === '' || burdenPct === null || burdenPct === undefined ? '' : burdenPct}
-                    onChange={(e) => setBurdenPct(e.target.value === '' ? '' as unknown as number : Number(e.target.value))}
+                    onChange={(e) => setBurdenPct(e.target.value === '' ? '' : Number(e.target.value))}
                     placeholder="72.5"
                     className="h-9 w-full rounded-lg border border-border bg-surface-primary px-3 text-sm text-right focus:outline-none focus:ring-2 focus:ring-oe-blue"
                   />
                 </div>
               </div>
-              {dailyWage > 0 && burdenPct > 0 && (
+              {Number(dailyWage) > 0 && Number(burdenPct) > 0 && (
                 <div className="rounded-lg bg-surface-secondary/50 px-3 py-2 text-xs text-content-secondary">
                   Costo HH estimado:{' '}
                   <span className="font-semibold text-content-primary">
@@ -3536,7 +3537,7 @@ function ResourceFormModal({
                   </label>
                   <input type="number" step="0.01" min="0"
                     value={fuelCostPerHour === '' || fuelCostPerHour === null || fuelCostPerHour === undefined ? '' : fuelCostPerHour}
-                    onChange={(e) => setFuelCostPerHour(e.target.value === '' ? '' as unknown as number : Number(e.target.value))}
+                    onChange={(e) => setFuelCostPerHour(e.target.value === '' ? '' : Number(e.target.value))}
                     placeholder="12.50"
                     className="h-9 w-full rounded-lg border border-border bg-surface-primary px-3 text-sm text-right focus:outline-none focus:ring-2 focus:ring-oe-blue"
                   />
@@ -3547,7 +3548,7 @@ function ResourceFormModal({
                   </label>
                   <input type="number" step="0.01" min="0"
                     value={acquisitionValue === '' || acquisitionValue === null || acquisitionValue === undefined ? '' : acquisitionValue}
-                    onChange={(e) => setAcquisitionValue(e.target.value === '' ? '' as unknown as number : Number(e.target.value))}
+                    onChange={(e) => setAcquisitionValue(e.target.value === '' ? '' : Number(e.target.value))}
                     placeholder="45000.00"
                     className="h-9 w-full rounded-lg border border-border bg-surface-primary px-3 text-sm text-right focus:outline-none focus:ring-2 focus:ring-oe-blue"
                   />
@@ -3560,7 +3561,7 @@ function ResourceFormModal({
                   </label>
                   <input type="number" step="0.5" min="0"
                     value={usefulLifeYears === '' || usefulLifeYears === null || usefulLifeYears === undefined ? '' : usefulLifeYears}
-                    onChange={(e) => setUsefulLifeYears(e.target.value === '' ? '' as unknown as number : Number(e.target.value))}
+                    onChange={(e) => setUsefulLifeYears(e.target.value === '' ? '' : Number(e.target.value))}
                     placeholder="5"
                     className="h-9 w-full rounded-lg border border-border bg-surface-primary px-3 text-sm text-right focus:outline-none focus:ring-2 focus:ring-oe-blue"
                   />
@@ -3571,7 +3572,7 @@ function ResourceFormModal({
                   </label>
                   <input type="number" step="0.5" min="0" max="100"
                     value={maintenancePct === '' || maintenancePct === null || maintenancePct === undefined ? '' : maintenancePct}
-                    onChange={(e) => setMaintenancePct(e.target.value === '' ? '' as unknown as number : Number(e.target.value))}
+                    onChange={(e) => setMaintenancePct(e.target.value === '' ? '' : Number(e.target.value))}
                     placeholder="5"
                     className="h-9 w-full rounded-lg border border-border bg-surface-primary px-3 text-sm text-right focus:outline-none focus:ring-2 focus:ring-oe-blue"
                   />

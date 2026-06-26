@@ -2,7 +2,7 @@ import { useState, useMemo, memo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Ruler } from 'lucide-react';
 import { Card, CardHeader, CardContent } from '@/shared/ui';
-import { formatCurrencyDisplay, getIntlLocale } from '@/shared/lib/formatters';
+import { formatCurrencyDisplay } from '@/shared/lib/formatters';
 
 /* ── Types ─────────────────────────────────────────────────────────────── */
 

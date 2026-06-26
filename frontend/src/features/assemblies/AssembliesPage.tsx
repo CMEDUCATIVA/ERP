@@ -68,7 +68,7 @@ function getCategoryColor(catValue: string): 'blue' | 'success' | 'warning' | 'e
   if (idx >= 0) return CATEGORY_PALETTE[idx] ?? 'neutral';
   // Custom categories: hash the value for a stable colour
   const customIdx = (catValue.length + catValue.charCodeAt(0) + catValue.charCodeAt(catValue.length - 1 || 0)) % CATEGORY_PALETTE.length;
-  return CATEGORY_PALETTE[customIdx];
+  return CATEGORY_PALETTE[customIdx] ?? 'neutral';
 };
 
 const UNIT_OPTIONS = unitKeys();
