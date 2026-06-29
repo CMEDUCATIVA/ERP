@@ -957,7 +957,7 @@ export function DwgTakeoffPage() {
     () => drawings.find((d) => d.id === selectedDrawingId),
     [drawings, selectedDrawingId],
   );
-  const { data: liveDrawing, isError: drawingPollError } = useQuery({
+  const { data: liveDrawing, isError: drawingPollError, error: drawingPollErrorObj } = useQuery({
     queryKey: ['dwg-drawing', selectedDrawingId],
     queryFn: () => fetchDrawing(selectedDrawingId!),
     // Always fetch the single drawing (not just while converting): the
@@ -1068,6 +1068,15 @@ export function DwgTakeoffPage() {
   const isNeedsConversion = drawingStatus === 'needs_conversion';
   const isErrorStatus = drawingStatus === 'error';
   const isEmptyStatus = drawingStatus === 'empty';
+  // Human-readable cause of a failing status poll (HTTP status + detail, or the
+  // network error message) so the user/admin can see *why*, not just "retrying".
+  const pollErrorDetail: string | undefined = (() => {
+    if (!drawingPollError || !drawingPollErrorObj) return undefined;
+    const e = drawingPollErrorObj as { status?: number; message?: string };
+    const msg =
+      typeof e.message === 'string' && e.message ? e.message : String(drawingPollErrorObj);
+    return typeof e.status === 'number' ? `HTTP ${e.status} — ${msg}` : msg;
+  })();
   const drawingErrorMessage =
     liveDrawing?.error_message ?? selectedDrawingFromList?.error_message ?? null;
 
@@ -2968,6 +2977,7 @@ export function DwgTakeoffPage() {
                   : Date.now()
               }
               pollError={drawingPollError}
+              pollErrorDetail={pollErrorDetail}
               onCancel={() => setConfirmDeleteId(selectedDrawingId)}
             />
           ) : isErrorStatus ? (
@@ -5588,6 +5598,7 @@ function ConversionProgressCard({
   startedAt,
   onCancel,
   pollError = false,
+  pollErrorDetail,
 }: {
   drawingName: string;
   filename: string;
@@ -5597,6 +5608,8 @@ function ConversionProgressCard({
   /** True when the status-polling request is currently failing (server/network
    *  error) — a real error signal, not a time heuristic. */
   pollError?: boolean;
+  /** The actual cause (HTTP status + detail / network message) of the failing poll. */
+  pollErrorDetail?: string;
 }) {
   const { t } = useTranslation();
   const [, force] = useState(0);
@@ -5794,12 +5807,25 @@ function ConversionProgressCard({
             data-testid="dwg-conversion-poll-error"
           >
             <AlertTriangle size={14} className="shrink-0 mt-0.5" />
-            <span>
-              {t('dwg_takeoff.conv_poll_error', {
-                defaultValue:
-                  'Could not reach the server to check the conversion status. Retrying automatically — if this persists, the server may be down; ask an admin to check the logs.',
-              })}
-            </span>
+            <div className="min-w-0">
+              <p>
+                {t('dwg_takeoff.conv_poll_error', {
+                  defaultValue:
+                    'Could not reach the server to check the conversion status. Retrying automatically — if this persists, the server may be down; ask an admin to check the logs.',
+                })}
+              </p>
+              {pollErrorDetail && (
+                <p
+                  className="mt-1 font-mono text-[10px] text-red-600/90 dark:text-red-400/90 break-words"
+                  data-testid="dwg-conversion-poll-error-cause"
+                >
+                  {t('dwg_takeoff.conv_poll_error_cause', {
+                    defaultValue: 'Cause: {{detail}}',
+                    detail: pollErrorDetail,
+                  })}
+                </p>
+              )}
+            </div>
           </div>
         )}
 
