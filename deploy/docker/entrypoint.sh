@@ -37,14 +37,33 @@ case "${DATABASE_URL:-}" in
     ;;
 esac
 
-# Apply database migrations before serving. The deployed code and the DB
-# schema MUST match: a missing column (e.g. oe_projects_project.regional_factor
-# from migration v3187) makes every ORM query 500, which manifested as DWG/PDF
-# conversions hanging because each project load failed. alembic derives the sync
-# (psycopg2) URL from DATABASE_URL automatically. `set -eu` aborts startup loudly
-# on a failed migration instead of serving against a broken schema.
+# Apply database migrations before serving. The deployed code and the DB schema
+# MUST match: missing columns/tables (e.g. oe_projects_project.regional_factor
+# from v3187, oe_*.project_id, oe_bim_asset_register) make ORM queries 500, which
+# manifested as DWG/PDF conversions hanging (each step loads the project).
+#
+# IMPORTANT: alembic's sync engine reads DATABASE_SYNC_URL, but operators often
+# set that to a different/unresolvable host than DATABASE_URL (we hit
+# "could not translate host name ... cmproyectos_erp_cmproyectos_erp" while the
+# app connected fine via DATABASE_URL). So unset DATABASE_SYNC_URL here and let
+# the app config derive the sync URL from DATABASE_URL — the exact host the app
+# uses. Retry a few times in case the DB isn't reachable yet at boot. `set -eu`
+# aborts startup if migrations ultimately fail, rather than serving a broken schema.
 echo "Applying database migrations (alembic upgrade head)…"
-( cd /app/backend && alembic upgrade head )
+(
+  cd /app/backend
+  unset DATABASE_SYNC_URL
+  n=0
+  until alembic upgrade head; do
+    n=$((n + 1))
+    if [ "$n" -ge 20 ]; then
+      echo "ERROR: alembic upgrade head failed after ${n} attempts; aborting startup." >&2
+      exit 1
+    fi
+    echo "DB not ready or migration failed (attempt ${n}/20); retrying in 3s…" >&2
+    sleep 3
+  done
+)
 echo "Database schema is up to date."
 
 exec python -m uvicorn app.main:create_app \
