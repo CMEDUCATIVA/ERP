@@ -5615,7 +5615,7 @@ function ConversionProgressCard({
   // status flips out of processing.
   const currentStep = status === 'uploaded' ? 1 : status === 'processing' ? 2 : 4;
 
-  const steps: { id: number; label: string; hint: string }[] = [
+  const steps: { id: number; label: string; hint: ReactNode }[] = [
     {
       id: 1,
       label: t('dwg_takeoff.conv_step_upload', { defaultValue: 'Upload received' }),
@@ -5628,10 +5628,21 @@ function ConversionProgressCard({
       label: t('dwg_takeoff.conv_step_convert', {
         defaultValue: 'Converting DWG to canonical JSON',
       }),
-      hint: t('dwg_takeoff.conv_step_convert_hint', {
-        defaultValue:
-          'DDC cad2data is parsing your drawing. This is the slow step - usually 3-8 minutes for a medium DWG, longer for large architectural sets.',
-      }),
+      hint: (
+        <>
+          {t('dwg_takeoff.conv_step_convert_hint_pre', {
+            defaultValue: 'DDC cad2data is processing your drawing. ',
+          })}
+          <mark className="bg-yellow-300 text-black font-bold px-1 rounded box-decoration-clone">
+            {t('dwg_takeoff.conv_step_convert_hint_slow', {
+              defaultValue: 'This is the slow step: usually 3-8 minutes. Grab a coffee ☕',
+            })}
+          </mark>{' '}
+          {t('dwg_takeoff.conv_step_convert_hint_post', {
+            defaultValue: 'For a medium DWG, longer for large architectural sets.',
+          })}
+        </>
+      ),
     },
     {
       id: 3,
