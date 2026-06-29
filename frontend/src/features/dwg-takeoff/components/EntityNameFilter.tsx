@@ -10,6 +10,7 @@
 
 import { useState, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import { ChevronDown, ChevronRight, Search, Eye, EyeOff } from 'lucide-react';
 import clsx from 'clsx';
 import type { DxfEntity } from '../api';
@@ -26,6 +27,42 @@ function entityDisplayName(e: DxfEntity): string {
     return trimmed.length > 30 ? `TEXT:${trimmed.slice(0, 27)}...` : `TEXT:${trimmed}`;
   }
   return e.type;
+}
+
+/** DXF entity-type → English fallback label. The raw type (and the
+ *  ``HATCH:``/``TEXT:`` prefixes) stays the grouping + visibility-filter key;
+ *  only the rendered label is localised so a Spanish user reads "Línea"
+ *  instead of "LINE". */
+const ENTITY_TYPE_LABELS: Record<string, string> = {
+  LINE: 'Line',
+  LWPOLYLINE: 'Polyline',
+  POLYLINE: 'Polyline',
+  CIRCLE: 'Circle',
+  ARC: 'Arc',
+  ELLIPSE: 'Ellipse',
+  SPLINE: 'Spline',
+  POINT: 'Point',
+  TEXT: 'Text',
+  MTEXT: 'Text',
+  HATCH: 'Hatch',
+  INSERT: 'Block',
+  DIMENSION: 'Dimension',
+};
+
+/** Localise a display name for RENDERING ONLY (never used as a key). Handles
+ *  the ``HATCH:<pattern>`` / ``TEXT:<content>`` prefixed forms and bare type
+ *  names; block names and unknown values pass through unchanged. */
+function localizeEntityName(raw: string, t: TFunction): string {
+  const colon = raw.indexOf(':');
+  if (colon > 0) {
+    const prefix = raw.slice(0, colon);
+    if (prefix === 'HATCH' || prefix === 'TEXT') {
+      return `${t(`dwg_takeoff.etype_${prefix}`, ENTITY_TYPE_LABELS[prefix] ?? prefix)}: ${raw.slice(colon + 1)}`;
+    }
+    return raw;
+  }
+  const fallback = ENTITY_TYPE_LABELS[raw];
+  return fallback ? t(`dwg_takeoff.etype_${raw}`, fallback) : raw;
 }
 
 interface Props {
@@ -146,23 +183,35 @@ export function EntityNameFilter({
             {displayed.map((group) => {
               const visible = visibleNames.has(group.name);
               return (
-                <button
+                <div
                   key={group.name}
-                  type="button"
-                  onClick={() => onToggleName(group.name)}
                   className={clsx(
-                    'flex items-center gap-2 rounded px-2 py-1 text-xs transition-colors',
-                    visible
-                      ? 'text-foreground hover:bg-surface-secondary'
-                      : 'text-muted-foreground hover:bg-surface-secondary',
+                    'flex items-center gap-2 rounded px-2 py-1 text-xs',
+                    visible ? 'text-foreground' : 'text-muted-foreground',
                   )}
                 >
-                  {visible ? <Eye size={13} /> : <EyeOff size={13} />}
-                  <span className="truncate flex-1 text-left font-mono text-[11px]">
-                    {group.name}
+                  {/* Only the eye toggles visibility — clicking the name / count
+                      no longer hides it (same affordance as the LayerPanel and
+                      the PDF legend fix, D-TKC-UP10). */}
+                  <button
+                    type="button"
+                    onClick={() => onToggleName(group.name)}
+                    title={t('dwg_takeoff.toggle_name_visibility', 'Show/hide')}
+                    aria-label={t('dwg_takeoff.toggle_name_visibility', 'Show/hide')}
+                    aria-pressed={visible}
+                    data-testid="dwg-name-eye-toggle"
+                    className="-m-1 flex shrink-0 items-center justify-center rounded p-1 text-muted-foreground transition-colors hover:bg-surface-secondary hover:text-foreground"
+                  >
+                    {visible ? <Eye size={13} /> : <EyeOff size={13} />}
+                  </button>
+                  <span
+                    className="truncate flex-1 text-left font-mono text-[11px]"
+                    title={group.name}
+                  >
+                    {localizeEntityName(group.name, t)}
                   </span>
                   <span className="text-muted-foreground tabular-nums">{group.count}</span>
-                </button>
+                </div>
               );
             })}
             {displayed.length === 0 && (

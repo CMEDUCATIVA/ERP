@@ -180,7 +180,7 @@ function routeForDocument(doc: DocItem): { path: string; module: 'takeoff' | 'dw
   }
   if (sourceModule === 'takeoff') {
     return {
-      path: `/takeoff?doc=${encodeURIComponent(doc.id)}&name=${encodeURIComponent(doc.name)}`,
+      path: `/takeoff?doc=${encodeURIComponent(doc.id)}&source=document&tab=measurements&name=${encodeURIComponent(doc.name)}`,
       module: 'takeoff',
     };
   }
@@ -1386,7 +1386,7 @@ export function DocumentsPage() {
                             {previewKind === 'pdf' && (
                               <button
                                 role="menuitem"
-                                onClick={() => { setOpenMenuId(null); navigate(`/takeoff?doc=${doc.id}&name=${encodeURIComponent(doc.name)}`); }}
+                                onClick={() => { setOpenMenuId(null); navigate(`/takeoff?doc=${encodeURIComponent(doc.id)}&source=document&tab=measurements&name=${encodeURIComponent(doc.name)}`); }}
                                 className="flex w-full items-center gap-2.5 px-3 py-2 text-xs text-content-primary hover:bg-surface-secondary transition-colors"
                               >
                                 <Ruler size={14} className="text-oe-blue" />

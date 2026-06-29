@@ -79,6 +79,7 @@ import {
   ResourceFullWidthRenderer,
   BimQtyPickerCellRenderer,
   DescriptionCellRenderer,
+  BimLinkPreviewHost,
   type ContextMenuTarget,
   type FullGridContext,
 } from './grid/cellRenderers';
@@ -90,7 +91,8 @@ import {
   resourceAwareTotalInBase,
   saveCustomUnit,
 } from './boqHelpers';
-import { RESOURCE_TYPES, getResourceTypeLabel } from './boqResourceTypes';
+import { getResourceTypeLabel, getResourceTypeOptions } from './boqResourceTypes';
+import { getResourceTypeDefinition } from '@/shared/lib/resourceTypes';
 import { CURRENCY_GROUPS } from '@/features/projects/CreateProjectPage';
 import { useToastStore } from '@/stores/useToastStore';
 import { useBoqDescDensityStore, BOQ_DESC_ROW_HEIGHT } from '@/stores/useBoqDescDensityStore';
@@ -324,6 +326,7 @@ export interface ManualResource {
   /** Optional reusable resource code (Issue #133). Persisted on the
    *  resource entry so it stays referenceable for future reuse. */
   code?: string;
+  metadata?: Record<string, unknown>;
 }
 
 export interface BOQGridProps {
@@ -2479,6 +2482,7 @@ const BOQGrid = forwardRef<BOQGridHandle, BOQGridProps>(function BOQGrid({
       const qty = parseFloat(quantity.replace(',', '.')) || 1;
       const rate =
         override?.unit_rate ?? (parseFloat(unitRate.replace(',', '.')) || 0);
+      const typeDef = getResourceTypeDefinition(effType);
       // Persist user-typed units so they show up next time app-wide.
       if (effUnit) saveCustomUnit(effUnit);
       onAddManualResource?.(positionId, {
@@ -2489,6 +2493,12 @@ const BOQGrid = forwardRef<BOQGridHandle, BOQGridProps>(function BOQGrid({
         unit_rate: rate,
         ...(effCurrency ? { currency: effCurrency } : {}),
         ...(effCode ? { code: effCode } : {}),
+        metadata: {
+          resource_type_code: typeDef?.code,
+          resource_type_name: typeDef?.name,
+          resource_type_badge: typeDef?.badge,
+          calculation_group: typeDef?.calculationGroup ?? effType,
+        },
       });
       setManualResourceDialog(null);
       setExpandedPositions((prev) => new Set(prev).add(positionId));
@@ -2575,6 +2585,13 @@ const BOQGrid = forwardRef<BOQGridHandle, BOQGridProps>(function BOQGrid({
       className="rounded-xl border border-border-light bg-surface-elevated shadow-xs overflow-hidden"
       onContextMenu={(e) => e.preventDefault()}
     >
+      {/* Single grid-level BIM preview popover — its open-state lives in
+          useBimPreviewStore so the cell button opens it on ONE click even when
+          AG-Grid recreates the cell renderer on focus/data-change. */}
+      <BimLinkPreviewHost
+        bimModelId={gridContext.bimModelId}
+        onUpdatePosition={gridContext.onUpdatePosition}
+      />
       <div
         className={`ag-theme-quartz ${
           // Shrink header text when many columns are visible so labels
@@ -3098,7 +3115,7 @@ const BOQGrid = forwardRef<BOQGridHandle, BOQGridProps>(function BOQGrid({
                   onChange={(e) => setManualResourceDialog({ ...manualResourceDialog, type: e.target.value })}
                   className="w-full h-8 rounded-md border border-border-medium bg-surface-primary px-2 text-xs text-content-primary outline-none focus:border-oe-blue"
                 >
-                  {RESOURCE_TYPES.map((rt) => (
+                  {getResourceTypeOptions().map((rt) => (
                     <option key={rt.value} value={rt.value}>
                       {getResourceTypeLabel(rt.value, t)}
                     </option>

@@ -16,6 +16,7 @@ from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any
 
 from fastapi import HTTPException, UploadFile, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import async_session_factory
@@ -623,6 +624,25 @@ class DwgTakeoffService:
             )
 
         file_format = ext.lstrip(".")
+
+        # Reject a duplicate upload: a drawing with the same original filename
+        # already in this project would create an identical, confusing row.
+        # The filmstrip showed three "PLANOS CURSO DE METRADOS" cards after a
+        # scale-PATCH timeout made the upload look failed and the user retried.
+        # Fail fast (before reading the body) with a 409 so the frontend can
+        # show a clear "already uploaded" message. Mirrors the PDF takeoff gate.
+        duplicates = await self.drawing_repo.count_by_filename_in_project(
+            project_id, filename
+        )
+        if duplicates:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f"A drawing named '{filename}' already exists in this "
+                    "project. Delete the existing one first, or rename the file."
+                ),
+            )
+
         content = await file.read()
         size_bytes = len(content)
 
@@ -1095,6 +1115,16 @@ class DwgTakeoffService:
             return
 
         await self.drawing_repo.update_fields(drawing_id, status="processing")
+        # Commit the 'processing' transition NOW, before the long (30-120s) DDC
+        # subprocess below. update_fields only flushes, so without this commit
+        # the UPDATE keeps a row-level write lock on this drawing row for the
+        # entire conversion. A concurrent PATCH /drawings/{id}/scale/ (the viewer
+        # auto-persists the scale right after upload) then blocks on that lock
+        # and the client aborts at its 30s timeout -> "Request timeout ... scale/"
+        # and a broken upload UX. Committing here releases the lock before the
+        # subprocess and also makes status='processing' visible to the frontend's
+        # status polling (READ COMMITTED can't see the uncommitted transition).
+        await self.session.commit()
 
         import subprocess
         from pathlib import Path as _Path
@@ -1426,6 +1456,47 @@ class DwgTakeoffService:
                     os.remove(thumb_path)
                 except OSError:
                     logger.warning("Could not delete thumbnail file: %s", thumb_path)
+
+        # Remove the cross-linked Documents-hub row so the drawing also
+        # disappears from "Project files". It was created on upload pointing at
+        # the SAME on-disk blob we just removed above, so leaving it would
+        # orphan a Document whose file no longer exists. Matched by the
+        # provenance metadata stamped at cross-link time (source_module +
+        # source_id). Best-effort: a failure here must never block the drawing
+        # delete (mirrors the PDF takeoff cross-link cleanup, D-TKC-UP06).
+        try:
+            from app.modules.documents.models import Document
+
+            # Filter in Python on the JSON provenance (portable across DB
+            # backends; mirrors import_drawing_from_document which reads the
+            # same metadata). Scoped to the drawing's project so we only scan
+            # that project's documents, not the whole table.
+            docs = (
+                await self.session.execute(
+                    select(Document).where(Document.project_id == drawing.project_id)
+                )
+            ).scalars().all()
+            removed = 0
+            for doc in docs:
+                meta = doc.metadata_ or {}
+                if (
+                    meta.get("source_module") == "dwg_takeoff"
+                    and str(meta.get("source_id")) == str(drawing_id)
+                ):
+                    await self.session.delete(doc)
+                    removed += 1
+            if removed:
+                logger.info(
+                    "Removed %d cross-linked document(s) for drawing %s",
+                    removed,
+                    drawing_id,
+                )
+        except Exception as exc:  # noqa: BLE001 - cleanup must never break the delete
+            logger.warning(
+                "Failed to remove cross-linked document for drawing %s: %s",
+                drawing_id,
+                exc,
+            )
 
         await self.drawing_repo.delete(drawing_id)
         logger.info("Drawing deleted: %s", drawing_id)

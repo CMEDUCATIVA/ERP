@@ -1032,6 +1032,20 @@ class TakeoffService:
                 ),
             )
 
+        # Gate 4: duplicate filename in this project — two revisions of the
+        # same drawing should live in the same upload slot, not as two rows.
+        if project_id:
+            pid = uuid.UUID(project_id)
+            existing = await self.repo.count_by_filename_in_project(filename, pid)
+            if existing > 0:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        f'A document named "{filename}" already exists in this project. '
+                        "Delete the existing document first or rename the file before uploading."
+                    ),
+                )
+
         # Count pages (failure-safe: logs internally and returns 0)
         page_count = _count_pdf_pages(content, filename=filename)
 
@@ -1099,7 +1113,21 @@ class TakeoffService:
         _TAKEOFF_DOCUMENTS_DIR.mkdir(parents=True, exist_ok=True)
         doc_id = uuid.uuid4()
         file_path = _TAKEOFF_DOCUMENTS_DIR / f"{doc_id}.pdf"
-        file_path.write_bytes(content)
+        try:
+            file_path.write_bytes(content)
+        except OSError as exc:
+            logger.exception(
+                "takeoff.upload_document: failed to write PDF to disk path=%r (%s)",
+                str(file_path),
+                _describe_pdf_input(content, filename=filename),
+            )
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=(
+                    "PDF could not be saved to disk. "
+                    "Check server disk space and permissions for the takeoff documents directory."
+                ),
+            ) from exc
 
         # Scanned PDFs without OCR get a distinct status so the UI
         # can surface a "needs OCR" affordance instead of silently
@@ -1275,8 +1303,17 @@ class TakeoffService:
         }
 
     async def delete_document(self, doc_id: str) -> None:
-        """Delete a takeoff document and its stored PDF file."""
+        """Delete a takeoff document, its stored PDF file, AND its measurements.
+
+        Measurements carry the document id as a plain string (no FK), so they
+        must be removed explicitly here. Otherwise deleting a document strands
+        its measurements under a now-dead id — invisible to every reopen and
+        silently piling up in the table — which is exactly what made a deleted-
+        then-re-uploaded plan come back "empty" while old rows accumulated
+        (D-TKC-UP08).
+        """
         doc = await self.repo.get_by_id(uuid.UUID(doc_id))
+        filename = doc.filename if doc is not None else None
         if doc is not None and doc.file_path:
             try:
                 file_path = Path(doc.file_path)
@@ -1285,6 +1322,11 @@ class TakeoffService:
                     logger.info("Removed takeoff PDF file: %s", file_path)
             except Exception:
                 logger.warning("Failed to remove takeoff PDF file: %s", doc.file_path)
+        # Cascade-delete the document's measurements (keyed by UUID and/or by
+        # filename) before dropping the document row.
+        removed = await self.measurement_repo.delete_for_document(doc_id, filename or "")
+        if removed:
+            logger.info("Deleted %d measurement(s) for takeoff document %s", removed, doc_id)
         await self.repo.delete(uuid.UUID(doc_id))
 
     # ── Measurement CRUD ─────────────────────────────────────────────────
@@ -1345,10 +1387,12 @@ class TakeoffService:
         )
         measurement = await self.measurement_repo.create(measurement)
         logger.info(
-            "Measurement created: %s type=%s project=%s value=%s (client=%s)",
+            "Measurement created: %s type=%s project=%s document=%s page=%s value=%s (client=%s)",
             measurement.id,
             data.type,
             data.project_id,
+            data.document_id,
+            data.page,
             recomputed,
             data.measurement_value,
         )
@@ -1709,7 +1753,19 @@ class TakeoffService:
             for data in items
         ]
         result = await self.measurement_repo.create_bulk(measurements)
-        logger.info("Bulk created %d measurements (server-side recomputed)", len(result))
+        type_counts: dict[str, int] = {}
+        document_counts: dict[str, int] = {}
+        for item in result:
+            type_counts[item.type] = type_counts.get(item.type, 0) + 1
+            doc_key = item.document_id or "<none>"
+            document_counts[doc_key] = document_counts.get(doc_key, 0) + 1
+        logger.info(
+            "Bulk created %d measurements (server-side recomputed): projects=%s documents=%s types=%s",
+            len(result),
+            sorted({str(item.project_id) for item in result}),
+            document_counts,
+            type_counts,
+        )
         return result
 
     async def get_measurement_summary(self, project_id: uuid.UUID) -> dict[str, Any]:

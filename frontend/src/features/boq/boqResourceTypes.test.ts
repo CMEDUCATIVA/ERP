@@ -41,16 +41,13 @@ const EXPECTED_TRANSLATIONS: Record<string, Record<string, string>> = {
 };
 
 describe('boqResourceTypes - RESOURCE_TYPES list', () => {
-  it('exposes the canonical 8 types in expected order', () => {
+  it('exposes the canonical 5 types in expected order', () => {
     expect(RESOURCE_TYPES.map((rt) => rt.value)).toEqual([
       'material',
       'labor',
       'equipment',
       'operator',
       'subcontractor',
-      'electricity',
-      'composite',
-      'other',
     ]);
   });
 
@@ -87,7 +84,7 @@ describe('boqResourceTypes - getResourceTypeLabel', () => {
 describe('boqResourceTypes - getResourceTypeI18nKey', () => {
   it('maps canonical values to their i18n key', () => {
     expect(getResourceTypeI18nKey('material')).toBe('boq.resource_type_material');
-    expect(getResourceTypeI18nKey('composite')).toBe('boq.resource_type_composite');
+    expect(getResourceTypeI18nKey('subcontractor')).toBe('boq.resource_type_subcontractor');
   });
 
   it('falls back to the `other` key for unknown values', () => {

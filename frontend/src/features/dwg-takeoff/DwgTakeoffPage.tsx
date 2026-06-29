@@ -29,6 +29,7 @@ import {
   Upload,
   FileUp,
   Trash2,
+  AlertTriangle,
   Loader2,
   FileText,
   Layers,
@@ -792,11 +793,19 @@ export function DwgTakeoffPage() {
           });
         }
         if (prev?.status !== 'error' && job.status === 'error' && job.projectId === projectId) {
-          addToast({
-            type: 'error',
-            title: t('dwg_takeoff.upload_error', { defaultValue: 'Upload failed' }),
-            message: job.errorMessage ?? undefined,
-          });
+          const em = job.errorMessage ?? '';
+          // A 409 that slipped past the pre-check (e.g. another tab uploaded
+          // the same file concurrently) surfaces as the friendly header
+          // warning, not a red "Upload failed" toast.
+          if (em.toLowerCase().includes('already exists')) {
+            setDuplicateWarning(em);
+          } else {
+            addToast({
+              type: 'error',
+              title: t('dwg_takeoff.upload_error', { defaultValue: 'Upload failed' }),
+              message: em || undefined,
+            });
+          }
         }
       }
     });
@@ -857,6 +866,9 @@ export function DwgTakeoffPage() {
     entityLabel?: string;
   } | null>(null);
   const [showUpload, setShowUpload] = useState(false);
+  // Amber "can't upload" warning shown in the page header when a duplicate
+  // filename is detected (pre-check) or the server returns a 409 (race).
+  const [duplicateWarning, setDuplicateWarning] = useState<string | null>(null);
   const [uploadName, setUploadName] = useState('');
   const [uploadDiscipline, setUploadDiscipline] = useState('architectural');
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
@@ -1521,8 +1533,17 @@ export function DwgTakeoffPage() {
 
   // Debounce backend sync so the user can type "1:50" one character at a time
   // without firing four PATCH requests.
+  //
+  // Gate on status==='ready': while a freshly-uploaded DWG is still
+  // 'processing', the backend conversion holds a write lock on the drawing row
+  // for the whole 30-120s DDC subprocess, so a PATCH /scale/ would block and
+  // abort at the 30s client timeout (surfacing a spurious upload error). The
+  // scale is still kept in localStorage meanwhile and gets persisted once the
+  // drawing turns 'ready' (this effect re-runs when the status changes).
   useEffect(() => {
     if (!selectedDrawingId) return;
+    const selected = drawings.find((x) => x.id === selectedDrawingId);
+    if (selected && selected.status !== 'ready') return;
     const handle = window.setTimeout(() => {
       updateScaleMutation.mutate({
         drawingId: selectedDrawingId,
@@ -1533,7 +1554,7 @@ export function DwgTakeoffPage() {
     return () => window.clearTimeout(handle);
     // intentionally excludes updateScaleMutation from deps — it's a stable ref
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedDrawingId, drawingScale, scaleMode]);
+  }, [selectedDrawingId, drawingScale, scaleMode, drawings]);
 
   // When the drawings list refreshes, hydrate local scale state from the
   // server-persisted fields (falling back to localStorage / defaults).
@@ -2720,6 +2741,32 @@ export function DwgTakeoffPage() {
 
   return (
     <div className="flex flex-col -mx-4 sm:-mx-7 -mt-6 -mb-4 overflow-hidden" style={{ height: 'calc(100vh - 56px)' }}>
+      {/* Duplicate filename warning — page header so it's visible over both
+          the upload hero and the viewer (mirrors the PDF takeoff pattern). */}
+      {duplicateWarning && (
+        <div
+          data-testid="dwg-duplicate-warning"
+          className="mx-4 sm:mx-7 mt-2 flex items-start gap-3 rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/40 px-5 py-4"
+        >
+          <AlertTriangle size={18} className="shrink-0 text-amber-600 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-amber-800 dark:text-amber-200">
+              {t('dwg_takeoff.duplicate_title', { defaultValue: 'No se puede subir' })}
+            </p>
+            <p className="text-sm text-amber-700 dark:text-amber-300 mt-0.5">
+              {duplicateWarning}
+            </p>
+          </div>
+          <button
+            onClick={() => setDuplicateWarning(null)}
+            aria-label={t('common.close', { defaultValue: 'Close' })}
+            className="shrink-0 rounded-md p-1 text-amber-500 hover:text-amber-700 dark:hover:text-amber-300 transition-colors"
+          >
+            <X size={14} />
+          </button>
+        </div>
+      )}
+
       {/* Top filter bar removed — ToolPalette now floats inside the viewer
           in the top-left corner so the drawing gets maximum vertical space
           and the tools live where the cursor already is while drawing. */}
@@ -3571,7 +3618,7 @@ export function DwgTakeoffPage() {
 
         {/* ── Right Panel: Layers / Annotations / Properties ───── */}
         {selectedDrawingId && (
-          <div className="flex w-72 flex-shrink-0 flex-col border-l border-border-light bg-surface-primary text-content-primary shadow-xl shadow-black/30">
+          <div className="flex w-96 flex-shrink-0 flex-col border-l border-border-light bg-surface-primary text-content-primary shadow-xl shadow-black/30">
             {/* Group aggregation panel (RFC 11 §4.5) — visible when 2+ entities selected */}
             {selectedEntityIds.size > 1 && (
               <div
@@ -4392,6 +4439,22 @@ export function DwgTakeoffPage() {
                     title={blocker || undefined}
                     onClick={() => {
                       if (!uploadFile || !projectId) return;
+                      // Pre-check: a drawing with the same filename already in
+                      // this project? Show the header warning instead of firing
+                      // a doomed upload that 409s (mirrors the PDF takeoff UX).
+                      const lower = uploadFile.name.toLowerCase();
+                      if (drawings.some((d) => d.filename?.toLowerCase() === lower)) {
+                        setDuplicateWarning(
+                          t('dwg_takeoff.duplicate_warning', {
+                            defaultValue:
+                              'A drawing named "{{name}}" already exists in this project. Delete the existing one first, or rename the file.',
+                            name: uploadFile.name,
+                          }).replace('{{name}}', uploadFile.name),
+                        );
+                        closeUploadModal();
+                        return;
+                      }
+                      setDuplicateWarning(null);
                       useDwgUploadStore.getState().startUpload({
                         file: uploadFile,
                         projectId,
@@ -4508,6 +4571,11 @@ export function DwgTakeoffPage() {
 
 /* ── Bottom Drawing Filmstrip ────────────────────────────────────────── */
 
+/** Max characters of a drawing name shown on a filmstrip card before it is
+ *  cut with an ellipsis. Kept short so a long name never overlaps the
+ *  hover delete button in the card's top-right corner. */
+const FILMSTRIP_NAME_MAX = 12;
+
 interface DrawingFilmstripProps {
   drawings: {
     id: string;
@@ -4623,8 +4691,14 @@ function DrawingFilmstrip({
                         'text-[10px] font-semibold truncate',
                         activeDrawingId === d.id ? 'text-blue-300' : 'text-slate-100',
                       )}
+                      title={d.name}
                     >
-                      {d.name}
+                      {/* Hard cap to a few chars + ellipsis so a long name never
+                          runs under the hover delete button (top-right). Full
+                          name stays available in the title tooltip. */}
+                      {d.name.length > FILMSTRIP_NAME_MAX
+                        ? `${d.name.slice(0, FILMSTRIP_NAME_MAX).trimEnd()}…`
+                        : d.name}
                     </span>
                   </div>
                   <div className="flex items-center gap-1 text-[9px] text-slate-400">
@@ -5320,8 +5394,8 @@ function SummaryTab({
               key={row.type}
               className="flex items-center justify-between rounded-md border border-border-light bg-surface-secondary/50 px-2 py-1 text-[10px]"
             >
-              <span className="font-mono text-content-primary truncate">
-                {row.type}
+              <span className="font-mono text-content-primary truncate" title={row.type}>
+                {t(`dwg_takeoff.etype_${row.type}`, row.type)}
               </span>
               <span className="tabular-nums font-semibold text-content-secondary">
                 {row.count}

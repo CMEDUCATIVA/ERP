@@ -57,7 +57,7 @@ import {
   Palette,
   Footprints,
 } from 'lucide-react';
-import { Badge, EmptyState, Breadcrumb, ConfirmDialog, ModuleHelpButton, ModuleGuideButton, DismissibleInfo, IntroRichText } from '@/shared/ui';
+import { Badge, EmptyState, Breadcrumb, ConfirmDialog, ModuleHelpButton, ModuleGuideButton, IntroRichText } from '@/shared/ui';
 import { bimGuide } from './bimGuide';
 import { useConfirm } from '@/shared/hooks/useConfirm';
 import { BIMViewer } from '@/shared/ui/BIMViewer';
@@ -84,7 +84,9 @@ import LinkDocumentToBIMModal from './LinkDocumentToBIMModal';
 import LinkActivityToBIMModal from './LinkActivityToBIMModal';
 import LinkRequirementToBIMModal from './LinkRequirementToBIMModal';
 import type { BIMGroupFilterCriteria } from './api';
-import { Filter, Search } from 'lucide-react';
+import { Filter, Search, PanelsTopLeft, MousePointerClick, ArrowUpRight, HelpCircle } from 'lucide-react';
+import { HeaderMenu, MenuLabel, MenuCheck, MenuAction } from './HeaderMenu';
+import { BIMHelpPanel } from './BIMHelpPanel';
 import { SmartViewsPanel } from '@/features/smart_views/SmartViewsPanel';
 import { useSmartViewState } from '@/features/smart_views/useSmartViewState';
 import { useProjectContextStore } from '@/stores/useProjectContextStore';
@@ -345,7 +347,12 @@ function ModelCard({ model, isActive, onClick, onDelete }: {
             <Cuboid size={15} className={isActive ? 'text-oe-blue' : 'text-content-tertiary'} />
           </div>
           <div className="min-w-0 flex-1">
-            <p className="text-xs font-semibold text-content-primary truncate">{model.name}</p>
+            <p
+              className="text-xs font-semibold text-content-primary truncate"
+              title={model.name}
+            >
+              {model.name.length > 12 ? `${model.name.slice(0, 12)}…` : model.name}
+            </p>
             <div className="flex items-center gap-1.5 mt-0.5">
               <span className={`w-1.5 h-1.5 rounded-full ${statusDot}`} />
               <span className="text-[10px] text-content-tertiary">{statusLabel}</span>
@@ -3019,7 +3026,7 @@ export function BIMPage() {
   return (
     <div className="flex flex-col -mx-4 sm:-mx-7 -mt-6 -mb-6 border-s border-border-light" style={{ height: 'calc(100vh - 56px)' }}>
       {/* ── Header ── */}
-      <div className="relative z-20 px-3 py-2.5 flex items-center justify-between border-b border-border-light bg-surface-primary">
+      <div className="relative z-50 px-3 py-2.5 flex items-center justify-between border-b border-border-light bg-surface-primary">
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2.5">
             <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-oe-blue/10 to-blue-50 dark:to-blue-950/20 border border-oe-blue/15 flex items-center justify-center">
@@ -3086,8 +3093,13 @@ export function BIMPage() {
             up (verified 1280/1440/1680/1920): the longest labels show only
             at min-[1900px], medium ones at 2xl; icon + tooltip + aria-label
             always remain. Header stat pills yield below 1360px. */}
-        <div className="flex min-w-0 flex-col items-end gap-1.5">
-          <div className="flex flex-wrap items-center justify-end gap-2">
+        {/* Single toolbar row (2026-06-28): the 17 controls are grouped into
+            dropdown menus (Panels / Selection / Appearance / Go to / Help) so
+            the header stays on ONE line and reads as ordered clusters instead
+            of a flat icon soup. Each menu trigger shows a count badge so the
+            active toggle state stays visible without opening it. The most-used
+            "Filter" stays a standalone quick button (founder ask: option B). */}
+        <div className="flex items-center gap-2">
           <button
             onClick={() => setUploadOpen((p) => !p)}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold bg-oe-blue text-white hover:bg-oe-blue-dark transition-colors shadow-sm"
@@ -3095,24 +3107,10 @@ export function BIMPage() {
           >
             <Plus size={13} /> {t('bim.add_model', { defaultValue: 'Add Model' })}
           </button>
-          <ModuleHelpButton tourId="bim" />
-          <ModuleGuideButton
-            content={bimGuide}
-            onCta={() => setUploadOpen(true)}
-          />
-          {elements.length > 0 && (
-            <a
-              href="/bim/rules?mode=requirements"
-              target="_blank"
-              rel="noopener noreferrer"
-              data-testid="bim-rules-link-top"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-medium text-content-secondary bg-surface-secondary border border-border-light hover:bg-surface-tertiary transition-colors"
-            >
-              <SlidersHorizontal size={13} /> {t('bim.rules_button', { defaultValue: 'Rules' })}
-            </a>
-          )}
+
           {elements.length > 0 && (
             <>
+              {/* Filter — most-used, kept standalone with its visible-count badge. */}
               <button
                 onClick={() => setFilterPanelOpen((p) => !p)}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-medium transition-colors border ${
@@ -3134,365 +3132,8 @@ export function BIMPage() {
                 )}
               </button>
 
-              <button
-                onClick={() => setSummaryPanelOpen(!summaryPanelOpen)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-medium transition-colors border ${
-                  summaryPanelOpen
-                    ? 'bg-oe-blue/10 text-oe-blue border-oe-blue/30'
-                    : 'text-content-secondary bg-surface-secondary border-border-light hover:bg-surface-tertiary'
-                }`}
-                title={
-                  summaryPanelOpen
-                    ? t('bim.summary_hide', { defaultValue: 'Hide summary panel' })
-                    : t('bim.summary_show', { defaultValue: 'Show summary panel' })
-                }
-                aria-label={t('bim.summary_toggle', { defaultValue: 'Toggle summary panel' })}
-                aria-pressed={summaryPanelOpen}
-                data-guide="bim-summary-button"
-              >
-                <LayoutGrid size={13} />
-                {t('bim.summary_button', { defaultValue: 'Summary' })}
-              </button>
-
-              {/* Property search — opens a small popover with a column /
-                  operator / value query builder hitting the Parquet via
-                  DuckDB. Matches are piped into the isolation set so the
-                  user sees only the queried elements (v3.12.0 / Stream D). */}
-              <button
-                onClick={() => setPropertySearchOpen((p) => !p)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-medium transition-colors border ${
-                  propertySearchOpen
-                    ? 'bg-oe-blue/10 text-oe-blue border-oe-blue/30'
-                    : 'text-content-secondary bg-surface-secondary border-border-light hover:bg-surface-tertiary'
-                }`}
-                title={t('bim.property_search_toggle', {
-                  defaultValue: 'Search element properties',
-                })}
-                aria-label={t('bim.property_search_toggle', {
-                  defaultValue: 'Search element properties',
-                })}
-                aria-pressed={propertySearchOpen}
-                data-testid="bim-property-search-toggle"
-              >
-                <Search size={13} />
-                <span className="hidden min-[1900px]:inline">
-                  {t('bim.property_search_button', { defaultValue: 'Property search' })}
-                </span>
-              </button>
-
-              {projectId && (
-                <button
-                  onClick={() => setSnapshotsOpen((p) => !p)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-medium transition-colors border ${
-                    snapshotsOpen
-                      ? 'bg-oe-blue/10 text-oe-blue border-oe-blue/30'
-                      : 'text-content-secondary bg-surface-secondary border-border-light hover:bg-surface-tertiary'
-                  }`}
-                  title={t('bim.snapshots_button_title', {
-                    defaultValue: 'Data snapshots for this project',
-                  })}
-                  aria-label={t('bim.snapshots_toggle', {
-                    defaultValue: 'Toggle snapshots popover',
-                  })}
-                  aria-pressed={snapshotsOpen}
-                  data-testid="bim-snapshots-toggle"
-                >
-                  <Layers size={13} />
-                  <span className="hidden 2xl:inline">{t('bim.snapshots_button', { defaultValue: 'Snapshots' })}</span>
-                </button>
-              )}
-
-              {projectId && (
-                <button
-                  onClick={() => {
-                    // Carry the currently-loaded BIM model id forward so
-                    // the geo page can flyTo() the matching tileset
-                    // instead of leaving the camera at the project anchor.
-                    const url = activeModelId
-                      ? `/projects/${projectId}/geo?model=${encodeURIComponent(activeModelId)}`
-                      : `/projects/${projectId}/geo`;
-                    navigate(url);
-                  }}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-medium transition-colors border text-content-secondary bg-surface-secondary border-border-light hover:bg-surface-tertiary"
-                  title={t('geo_hub.view_on_map', { defaultValue: 'View on map' })}
-                  aria-label={t('geo_hub.view_on_map', { defaultValue: 'View on map' })}
-                  data-testid="bim-view-on-map"
-                >
-                  <Globe2 size={13} />
-                  <span className="hidden min-[1900px]:inline">
-                    {t('geo_hub.view_on_map', { defaultValue: 'View on map' })}
-                  </span>
-                </button>
-              )}
-
-              {/* Round-trip with /data-explorer. The `?bimModel=<id>` deeplink
-                  is already handled by CadDataExplorerPage which calls
-                  `sessionFromBimModel` server-side (idempotent — reuses an
-                  existing session for the same model). */}
-              {activeModelId && (
-                <button
-                  onClick={() => {
-                    navigate(`/data-explorer?bimModel=${encodeURIComponent(activeModelId)}`);
-                  }}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-medium transition-colors border text-content-secondary bg-surface-secondary border-border-light hover:bg-surface-tertiary"
-                  title={t('bim.open_in_data_explorer_title', {
-                    defaultValue: 'Explore extracted data tables',
-                  })}
-                  aria-label={t('bim.open_in_data_explorer', {
-                    defaultValue: 'Open in Data Explorer',
-                  })}
-                  data-testid="bim-open-in-data-explorer"
-                >
-                  <Database size={13} />
-                  <span className="hidden min-[1900px]:inline">
-                    {t('bim.open_in_data_explorer', {
-                      defaultValue: 'Open in Data Explorer',
-                    })}
-                  </span>
-                </button>
-              )}
-            </>
-          )}
-          </div>
-
-          {/* Row 2: view controls - only meaningful with a loaded model. */}
-          {elements.length > 0 && (
-            <div className="flex flex-wrap items-center justify-end gap-2">
-              <button
-                onClick={() => setDimensionsVisible(!dimensionsVisible)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-medium transition-colors border ${
-                  dimensionsVisible
-                    ? 'bg-oe-blue/10 text-oe-blue border-oe-blue/30'
-                    : 'text-content-secondary bg-surface-secondary border-border-light hover:bg-surface-tertiary'
-                }`}
-                title={
-                  dimensionsVisible
-                    ? t('bim.dimensions_hide', {
-                        defaultValue: 'Hide bounding-box dimensions on selection',
-                      })
-                    : t('bim.dimensions_show', {
-                        defaultValue: 'Show bounding-box dimensions on selection',
-                      })
-                }
-                aria-label={t('bim.dimensions_toggle', {
-                  defaultValue: 'Toggle bounding-box dimensions',
-                })}
-                aria-pressed={dimensionsVisible}
-              >
-                <Maximize2 size={13} />
-                <span className="hidden min-[1900px]:inline">
-                  {t('bim.dimensions_button', { defaultValue: 'BBox Dimensions' })}
-                </span>
-              </button>
-
-              <button
-                onClick={() => setAssetCardEnabled(!assetCardEnabled)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-medium transition-colors border ${
-                  assetCardEnabled
-                    ? 'bg-oe-blue/10 text-oe-blue border-oe-blue/30'
-                    : 'text-content-secondary bg-surface-secondary border-border-light hover:bg-surface-tertiary'
-                }`}
-                title={
-                  assetCardEnabled
-                    ? t('bim.asset_card_hide', {
-                        defaultValue: 'Hide asset-info card on selection',
-                      })
-                    : t('bim.asset_card_show', {
-                        defaultValue: 'Show asset-info card on selection',
-                      })
-                }
-                aria-label={t('bim.asset_card_toggle', {
-                  defaultValue: 'Toggle asset register card',
-                })}
-                aria-pressed={assetCardEnabled}
-                data-testid="bim-asset-card-toggle"
-              >
-                <Package size={13} />
-                <span className="hidden 2xl:inline">{t('bim.asset_card_button', { defaultValue: 'Asset Card' })}</span>
-              </button>
-
-              <button
-                onClick={() => setBoqPanelOpen(!boqPanelOpen)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-medium transition-colors border ${
-                  boqPanelOpen
-                    ? 'bg-oe-blue/10 text-oe-blue border-oe-blue/30'
-                    : 'text-content-secondary bg-surface-secondary border-border-light hover:bg-surface-tertiary'
-                }`}
-                title={t('bim.linked_boq_toggle', { defaultValue: 'Toggle linked BOQ panel' })}
-                aria-label={t('bim.linked_boq_toggle', { defaultValue: 'Toggle linked BOQ panel' })}
-                aria-pressed={boqPanelOpen}
-                data-testid="bim-tour-linked-boq-button"
-              >
-                <ClipboardList size={13} />
-                <span className="hidden 2xl:inline">{t('bim.linked_boq_button', { defaultValue: 'Linked BOQ' })}</span>
-              </button>
-
-              <button
-                onClick={() => setDiffPanelOpen((o) => !o)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-medium transition-colors border ${
-                  diffPanelOpen
-                    ? 'bg-oe-blue/10 text-oe-blue border-oe-blue/30'
-                    : 'text-content-secondary bg-surface-secondary border-border-light hover:bg-surface-tertiary'
-                }`}
-                title={t('bim.diff_toggle', {
-                  defaultValue: 'Compare model versions',
-                })}
-                aria-label={t('bim.diff_toggle', {
-                  defaultValue: 'Compare model versions',
-                })}
-                aria-pressed={diffPanelOpen}
-                data-testid="bim-diff-toggle"
-              >
-                <GitCompare size={13} />
-                {t('bim.diff_button', { defaultValue: 'Compare' })}
-              </button>
-
-              <button
-                onClick={() => setSmartViewsPanelOpen((o) => !o)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-medium transition-colors border ${
-                  smartViewsPanelOpen
-                    ? 'bg-oe-blue/10 text-oe-blue border-oe-blue/30'
-                    : 'text-content-secondary bg-surface-secondary border-border-light hover:bg-surface-tertiary'
-                }`}
-                title={t('smartViews.title', { defaultValue: 'Smart Views' })}
-                aria-label={t('smartViews.title', { defaultValue: 'Smart Views' })}
-                aria-pressed={smartViewsPanelOpen}
-                data-testid="bim-smart-views-toggle"
-              >
-                <Sparkles size={13} />
-                <span className="hidden 2xl:inline">{t('smartViews.title', { defaultValue: 'Smart Views' })}</span>
-              </button>
-
-              {/* Color-by selector — three families:
-                  · Field-based (Storey / Type) use the hash-to-hue palette
-                  · Compliance-based (Validation / BOQ / Documents) use a
-                    fixed red/amber/green palette and turn the 3D viewer
-                    into a live compliance dashboard. */}
-              <select
-                value={colorByMode}
-                onChange={(e) =>
-                  setColorByMode(
-                    e.target.value as
-                      | 'default'
-                      | 'storey'
-                      | 'type'
-                      | 'validation'
-                      | 'boq_coverage'
-                      | 'document_coverage'
-                      | '5d_cost'
-                      | '4d_schedule'
-                      | 'by_progress',
-                  )
-                }
-                title={t('bim.color_by', { defaultValue: 'Color by' })}
-                aria-label={t('bim.color_by', { defaultValue: 'Color by' })}
-                data-testid="bim-color-mode-select"
-                className="text-[11px] py-1.5 px-2 rounded-lg border border-border-light bg-surface-secondary text-content-secondary hover:bg-surface-tertiary focus:outline-none focus:ring-1 focus:ring-oe-blue"
-              >
-                <optgroup label={t('bim.color_group_field', { defaultValue: 'By field' })}>
-                  <option value="default">{t('bim.color_default', { defaultValue: 'Default' })}</option>
-                  <option value="storey">{t('bim.color_storey', { defaultValue: 'Storey' })}</option>
-                  <option value="type">{t('bim.color_type', { defaultValue: 'Category' })}</option>
-                </optgroup>
-                <optgroup label={t('bim.color_group_status', { defaultValue: 'By compliance' })}>
-                  <option value="validation">
-                    {t('bim.color_validation', { defaultValue: 'Validation status' })}
-                  </option>
-                  <option value="boq_coverage">
-                    {t('bim.color_boq_coverage', { defaultValue: 'BOQ link coverage' })}
-                  </option>
-                  <option value="document_coverage">
-                    {t('bim.color_doc_coverage', { defaultValue: 'Document coverage' })}
-                  </option>
-                </optgroup>
-                <optgroup label={t('bim.color_group_cost', { defaultValue: 'By cost' })}>
-                  <option value="5d_cost">
-                    {t('bim.color_5d_cost', { defaultValue: '5D unit rate' })}
-                  </option>
-                </optgroup>
-                <optgroup label={t('bim.color_group_schedule', { defaultValue: 'By schedule' })}>
-                  <option value="4d_schedule">
-                    {t('bim.color_4d_schedule', { defaultValue: '4D timeline' })}
-                  </option>
-                  <option value="by_progress">
-                    {t('bim.color_by_progress', { defaultValue: 'By progress' })}
-                  </option>
-                </optgroup>
-              </select>
-
-              {/* Render-quality segment — 4 presets controlling pixelRatio,
-                  lighting and per-material transparency. Persisted in
-                  localStorage via useBIMViewerStore. Fast/Walk strip
-                  alpha-blending; Visual keeps glass translucent but flips
-                  walls/slabs opaque (cleaner *and* faster than Default). */}
-              <div
-                role="radiogroup"
-                aria-label={t('bim.quality_mode', { defaultValue: 'Render quality' })}
-                className="inline-flex items-center rounded-lg border border-border-light bg-surface-secondary p-0.5 gap-0.5"
-                data-testid="bim-quality-mode"
-              >
-                {(
-                  [
-                    {
-                      mode: 'fast' as const,
-                      Icon: Zap,
-                      label: t('bim.quality_fast', { defaultValue: 'Fast' }),
-                      tooltip: t('bim.quality_fast_hint', {
-                        defaultValue: 'Fastest - opaque walls, low pixel ratio',
-                      }),
-                    },
-                    {
-                      mode: 'default' as const,
-                      Icon: Eye,
-                      label: t('bim.quality_default', { defaultValue: 'Default' }),
-                      tooltip: t('bim.quality_default_hint', {
-                        defaultValue: 'Translucent - full lighting',
-                      }),
-                    },
-                    {
-                      mode: 'visual' as const,
-                      Icon: Palette,
-                      label: t('bim.quality_visual', { defaultValue: 'Visual' }),
-                      tooltip: t('bim.quality_visual_hint', {
-                        defaultValue: 'Cleanest - opaque + glass transparency only',
-                      }),
-                    },
-                    {
-                      mode: 'walk' as const,
-                      Icon: Footprints,
-                      label: t('bim.quality_walk', { defaultValue: 'Walk' }),
-                      tooltip: t('bim.quality_walk_hint', {
-                        defaultValue: 'Smoothest for walk-mode navigation',
-                      }),
-                    },
-                  ]
-                ).map(({ mode, Icon, label, tooltip }) => {
-                  const isActive = qualityMode === mode;
-                  return (
-                    <button
-                      key={mode}
-                      type="button"
-                      role="radio"
-                      aria-checked={isActive}
-                      aria-label={label}
-                      title={tooltip}
-                      onClick={() => setQualityMode(mode)}
-                      data-testid={`bim-quality-${mode}`}
-                      className={clsx(
-                        'flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium transition-colors',
-                        isActive
-                          ? 'bg-oe-blue text-white shadow-sm'
-                          : 'text-content-secondary hover:bg-surface-tertiary',
-                      )}
-                    >
-                      <Icon size={12} />
-                      <span className="hidden 2xl:inline">{label}</span>
-                    </button>
-                  );
-                })}
-              </div>
-
-              {/* Isolate toggle (when an element is selected) */}
+              {/* Isolate — contextual quick action beside Filter, shown when an
+                  element is selected. */}
               {selectedElementId && (
                 <button
                   onClick={() =>
@@ -3510,17 +3151,329 @@ export function BIMPage() {
                     : t('bim.isolate', { defaultValue: 'Isolate' })}
                 </button>
               )}
-            </div>
+
+              {/* Panels menu — side panels. Toggles stay open for multi-flip. */}
+              <HeaderMenu
+                icon={PanelsTopLeft}
+                label={t('bim.menu_panels', { defaultValue: 'Panels' })}
+                activeCount={
+                  [
+                    summaryPanelOpen,
+                    boqPanelOpen,
+                    propertySearchOpen,
+                    snapshotsOpen,
+                    smartViewsPanelOpen,
+                    diffPanelOpen,
+                  ].filter(Boolean).length
+                }
+                testId="bim-menu-panels"
+              >
+                {(close) => (
+                  <>
+                    <MenuLabel>{t('bim.menu_panels_section', { defaultValue: 'Side panels' })}</MenuLabel>
+                    <MenuCheck
+                      close={close}
+                      icon={LayoutGrid}
+                      label={t('bim.summary_button', { defaultValue: 'Summary' })}
+                      checked={summaryPanelOpen}
+                      onToggle={() => setSummaryPanelOpen(!summaryPanelOpen)}
+                      testId="bim-summary-button"
+                    />
+                    <MenuCheck
+                      close={close}
+                      icon={ClipboardList}
+                      label={t('bim.linked_boq_button', { defaultValue: 'Linked BOQ' })}
+                      checked={boqPanelOpen}
+                      onToggle={() => setBoqPanelOpen(!boqPanelOpen)}
+                      testId="bim-tour-linked-boq-button"
+                    />
+                    <MenuCheck
+                      close={close}
+                      icon={Search}
+                      label={t('bim.property_search_button', { defaultValue: 'Property search' })}
+                      checked={propertySearchOpen}
+                      onToggle={() => setPropertySearchOpen((p) => !p)}
+                      testId="bim-property-search-toggle"
+                    />
+                    {projectId && (
+                      <MenuCheck
+                        close={close}
+                        icon={Layers}
+                        label={t('bim.snapshots_button', { defaultValue: 'Snapshots' })}
+                        checked={snapshotsOpen}
+                        onToggle={() => setSnapshotsOpen((p) => !p)}
+                        testId="bim-snapshots-toggle"
+                      />
+                    )}
+                    <MenuCheck
+                      close={close}
+                      icon={Sparkles}
+                      label={t('smartViews.title', { defaultValue: 'Smart Views' })}
+                      checked={smartViewsPanelOpen}
+                      onToggle={() => setSmartViewsPanelOpen((o) => !o)}
+                      testId="bim-smart-views-toggle"
+                    />
+                    <MenuCheck
+                      close={close}
+                      icon={GitCompare}
+                      label={t('bim.diff_button', { defaultValue: 'Compare' })}
+                      checked={diffPanelOpen}
+                      onToggle={() => setDiffPanelOpen((o) => !o)}
+                      testId="bim-diff-toggle"
+                    />
+                  </>
+                )}
+              </HeaderMenu>
+
+              {/* Selection menu — overlays shown when an element is selected. */}
+              <HeaderMenu
+                icon={MousePointerClick}
+                label={t('bim.menu_selection', { defaultValue: 'Selection' })}
+                activeCount={[dimensionsVisible, assetCardEnabled].filter(Boolean).length}
+                testId="bim-menu-selection"
+              >
+                {(close) => (
+                  <>
+                    <MenuLabel>
+                      {t('bim.menu_selection_section', { defaultValue: 'On selecting an element' })}
+                    </MenuLabel>
+                    <MenuCheck
+                      close={close}
+                      icon={Maximize2}
+                      label={t('bim.dimensions_button', { defaultValue: 'BBox Dimensions' })}
+                      checked={dimensionsVisible}
+                      onToggle={() => setDimensionsVisible(!dimensionsVisible)}
+                    />
+                    <MenuCheck
+                      close={close}
+                      icon={Package}
+                      label={t('bim.asset_card_button', { defaultValue: 'Asset Card' })}
+                      checked={assetCardEnabled}
+                      onToggle={() => setAssetCardEnabled(!assetCardEnabled)}
+                      testId="bim-asset-card-toggle"
+                    />
+                  </>
+                )}
+              </HeaderMenu>
+
+              {/* Appearance menu — color-by + render quality (view settings). */}
+              <HeaderMenu
+                icon={Palette}
+                label={t('bim.menu_appearance', { defaultValue: 'Appearance' })}
+                testId="bim-menu-appearance"
+              >
+                {() => (
+                  <div className="w-96 px-2 py-1 space-y-1.5">
+                    <div>
+                      <MenuLabel>{t('bim.color_by', { defaultValue: 'Color by' })}</MenuLabel>
+                      <select
+                        value={colorByMode}
+                        onChange={(e) =>
+                          setColorByMode(
+                            e.target.value as
+                              | 'default'
+                              | 'storey'
+                              | 'type'
+                              | 'validation'
+                              | 'boq_coverage'
+                              | 'document_coverage'
+                              | '5d_cost'
+                              | '4d_schedule'
+                              | 'by_progress',
+                          )
+                        }
+                        title={t('bim.color_by', { defaultValue: 'Color by' })}
+                        aria-label={t('bim.color_by', { defaultValue: 'Color by' })}
+                        data-testid="bim-color-mode-select"
+                        className="w-full text-[12px] py-1.5 px-2 rounded-lg border border-border-light bg-surface-secondary text-content-secondary hover:bg-surface-tertiary focus:outline-none focus:ring-1 focus:ring-oe-blue"
+                      >
+                        <optgroup label={t('bim.color_group_field', { defaultValue: 'By field' })}>
+                          <option value="default">{t('bim.color_default', { defaultValue: 'Default' })}</option>
+                          <option value="storey">{t('bim.color_storey', { defaultValue: 'Storey' })}</option>
+                          <option value="type">{t('bim.color_type', { defaultValue: 'Category' })}</option>
+                        </optgroup>
+                        <optgroup label={t('bim.color_group_status', { defaultValue: 'By compliance' })}>
+                          <option value="validation">
+                            {t('bim.color_validation', { defaultValue: 'Validation status' })}
+                          </option>
+                          <option value="boq_coverage">
+                            {t('bim.color_boq_coverage', { defaultValue: 'BOQ link coverage' })}
+                          </option>
+                          <option value="document_coverage">
+                            {t('bim.color_doc_coverage', { defaultValue: 'Document coverage' })}
+                          </option>
+                        </optgroup>
+                        <optgroup label={t('bim.color_group_cost', { defaultValue: 'By cost' })}>
+                          <option value="5d_cost">
+                            {t('bim.color_5d_cost', { defaultValue: '5D unit rate' })}
+                          </option>
+                        </optgroup>
+                        <optgroup label={t('bim.color_group_schedule', { defaultValue: 'By schedule' })}>
+                          <option value="4d_schedule">
+                            {t('bim.color_4d_schedule', { defaultValue: '4D timeline' })}
+                          </option>
+                          <option value="by_progress">
+                            {t('bim.color_by_progress', { defaultValue: 'By progress' })}
+                          </option>
+                        </optgroup>
+                      </select>
+                    </div>
+                    <div>
+                      <MenuLabel>{t('bim.quality_mode', { defaultValue: 'Render quality' })}</MenuLabel>
+                      <div
+                        role="radiogroup"
+                        aria-label={t('bim.quality_mode', { defaultValue: 'Render quality' })}
+                        className="inline-flex items-center rounded-lg border border-border-light bg-surface-secondary p-0.5 gap-0.5"
+                        data-testid="bim-quality-mode"
+                      >
+                        {(
+                          [
+                            {
+                              mode: 'fast' as const,
+                              Icon: Zap,
+                              label: t('bim.quality_fast', { defaultValue: 'Fast' }),
+                              tooltip: t('bim.quality_fast_hint', {
+                                defaultValue: 'Fastest - opaque walls, low pixel ratio',
+                              }),
+                            },
+                            {
+                              mode: 'default' as const,
+                              Icon: Eye,
+                              label: t('bim.quality_default', { defaultValue: 'Default' }),
+                              tooltip: t('bim.quality_default_hint', {
+                                defaultValue: 'Translucent - full lighting',
+                              }),
+                            },
+                            {
+                              mode: 'visual' as const,
+                              Icon: Palette,
+                              label: t('bim.quality_visual', { defaultValue: 'Visual' }),
+                              tooltip: t('bim.quality_visual_hint', {
+                                defaultValue: 'Cleanest - opaque + glass transparency only',
+                              }),
+                            },
+                            {
+                              mode: 'walk' as const,
+                              Icon: Footprints,
+                              label: t('bim.quality_walk', { defaultValue: 'Walk' }),
+                              tooltip: t('bim.quality_walk_hint', {
+                                defaultValue: 'Smoothest for walk-mode navigation',
+                              }),
+                            },
+                          ]
+                        ).map(({ mode, Icon, label, tooltip }) => {
+                          const isActive = qualityMode === mode;
+                          return (
+                            <button
+                              key={mode}
+                              type="button"
+                              role="radio"
+                              aria-checked={isActive}
+                              aria-label={label}
+                              title={tooltip}
+                              onClick={() => setQualityMode(mode)}
+                              data-testid={`bim-quality-${mode}`}
+                              className={clsx(
+                                'flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium transition-colors',
+                                isActive
+                                  ? 'bg-oe-blue text-white shadow-sm'
+                                  : 'text-content-secondary hover:bg-surface-tertiary',
+                              )}
+                            >
+                              <Icon size={12} />
+                              <span>{label}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </HeaderMenu>
+            </>
           )}
+
+          {/* Go-to menu — cross-module jumps (rules / map / data explorer). */}
+          {(elements.length > 0 || projectId || activeModelId) && (
+            <HeaderMenu
+              icon={ArrowUpRight}
+              label={t('bim.menu_goto', { defaultValue: 'Go to' })}
+              testId="bim-menu-goto"
+            >
+              {(close) => (
+                <>
+                  {elements.length > 0 && (
+                    <MenuAction
+                      close={close}
+                      icon={SlidersHorizontal}
+                      label={t('bim.rules_button', { defaultValue: 'Rules' })}
+                      href="/bim/rules?mode=requirements"
+                      trailingIcon={ArrowUpRight}
+                      testId="bim-rules-link-top"
+                    />
+                  )}
+                  {projectId && (
+                    <MenuAction
+                      close={close}
+                      icon={Globe2}
+                      label={t('geo_hub.view_on_map', { defaultValue: 'View on map' })}
+                      onClick={() => {
+                        // Carry the loaded model id so geo flyTo()s its tileset.
+                        const url = activeModelId
+                          ? `/projects/${projectId}/geo?model=${encodeURIComponent(activeModelId)}`
+                          : `/projects/${projectId}/geo`;
+                        navigate(url);
+                      }}
+                      trailingIcon={ArrowUpRight}
+                      testId="bim-view-on-map"
+                    />
+                  )}
+                  {activeModelId && (
+                    <MenuAction
+                      close={close}
+                      icon={Database}
+                      label={t('bim.open_in_data_explorer', { defaultValue: 'Open in Data Explorer' })}
+                      onClick={() =>
+                        navigate(`/data-explorer?bimModel=${encodeURIComponent(activeModelId)}`)
+                      }
+                      trailingIcon={ArrowUpRight}
+                      testId="bim-open-in-data-explorer"
+                    />
+                  )}
+                </>
+              )}
+            </HeaderMenu>
+          )}
+
+          {/* Help menu — guided tour + how-it-works guide. */}
+          <HeaderMenu
+            icon={HelpCircle}
+            label={t('bim.menu_help', { defaultValue: 'Help' })}
+            testId="bim-menu-help"
+          >
+            {() => (
+              <div className="flex flex-col gap-1 p-1.5 w-56">
+                <ModuleHelpButton tourId="bim" className="w-full justify-start" />
+                <ModuleGuideButton
+                  content={bimGuide}
+                  onCta={() => setUploadOpen(true)}
+                  className="w-full justify-start"
+                />
+              </div>
+            )}
+          </HeaderMenu>
         </div>
       </div>
 
       {/* ── Page intro / help banner — explains what the BIM viewer does and
             how it ties into BOQ and the canonical model. Collapses to a
             one-line header (remembered per page in localStorage). ── */}
-      <DismissibleInfo
-        storageKey="bim"
-        className="mx-3 mt-2"
+      {/* Floating help panel (founder ask 2026-06-28): the BIM intro floats at
+          the top-right over the canvas instead of pushing the viewer down. It
+          starts open every load, auto-minimizes once after 60 s, and [—]/[✕]
+          both collapse it to a circular "?" — the only way back (session-only,
+          no menu / top-bar re-entry). See BIMHelpPanel. */}
+      <BIMHelpPanel
         title={t('bim.intro_title', { defaultValue: 'Turn the model into priced quantities' })}
         more={
           t('bim.intro_more', { defaultValue: '' })
@@ -3537,7 +3490,7 @@ export function BIMPage() {
           defaultValue:
             'Open a converted CAD or BIM model in 3D, inspect element properties and quantities, and filter by storey, category or discipline. Link elements to BOQ positions so takeoff, cost and schedule all flow from the canonical model, and jump out to the Data Explorer or the map at any point.',
         })}
-      </DismissibleInfo>
+      </BIMHelpPanel>
 
       {/* ── Converter status banner — surfaces any missing DDC
             converters so the user can one-click install them before

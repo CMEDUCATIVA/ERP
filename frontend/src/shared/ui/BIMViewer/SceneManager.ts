@@ -29,6 +29,21 @@ export type ViewPreset =
   | 'iso_sw'
   | 'fit';
 
+/**
+ * Live WebGL context bookkeeping. Browsers cap simultaneous contexts (~8-16),
+ * so on dispose we force-lose this context ONLY when many are still alive, to
+ * relieve that pressure. Calling forceContextLoss() unconditionally regressed
+ * on AMD GPUs whose Chrome `exit_on_context_lost` workaround kills the GPU
+ * process on ANY context-loss event: a React StrictMode dev double-mount, or a
+ * fast navigate-away-and-back, disposed the first context (killing the GPU) and
+ * the immediate remount got a "born-lost" context — three.js then throws from
+ * getMaxPrecision reading a null shader-precision and the viewer fell back to
+ * "3D unavailable". Below the threshold we skip forceContextLoss and let
+ * renderer.dispose() + GC reclaim the context, keeping the GPU process alive.
+ */
+let liveWebGLContexts = 0;
+const MAX_SAFE_LIVE_CONTEXTS = 6;
+
 export class SceneManager {
   readonly scene: THREE.Scene;
   readonly camera: THREE.PerspectiveCamera;
@@ -107,6 +122,9 @@ export class SceneManager {
       // artefact regardless of the model's unit/scale.
       logarithmicDepthBuffer: true,
     });
+    // The WebGLRenderer constructor succeeded → a live context exists. Counted
+    // so dispose() can decide whether forceContextLoss() is worth the AMD risk.
+    liveWebGLContexts += 1;
     // Pixel ratio capped at 1 — high-DPI rendering on a 5 000-mesh BIM
     // scene quadruples the per-frame fragment cost for marginal visual
     // gain on the engineering-readability use case. Users who want a
@@ -1082,16 +1100,22 @@ export class SceneManager {
       }
     });
 
-    // Release the underlying WebGL context, not just the GPU resources.
+    // Release the underlying WebGL context only under live-context pressure.
     // renderer.dispose() frees programs/render-targets but leaves the context
-    // alive; the BIM viewer mounts/unmounts on every model navigation and tab
-    // switch, and browsers cap live contexts (~8-16). Without an explicit
-    // forceContextLoss the oldest context gets killed and new canvases render
-    // black ("Too many active WebGL contexts").
-    try {
-      this.renderer.forceContextLoss();
-    } catch {
-      // some headless / mocked renderers don't implement it - safe to ignore
+    // alive; browsers cap live contexts (~8-16). We force-lose THIS context
+    // only when several others are still alive (heavy multi-model sessions),
+    // because forceContextLoss() kills the GPU process on AMD's
+    // `exit_on_context_lost` and breaks the immediate StrictMode/navigate-back
+    // remount (see the liveWebGLContexts note at the top of this file). In the
+    // common 1-2 context case we skip it and let renderer.dispose() + GC
+    // reclaim the context.
+    liveWebGLContexts = Math.max(0, liveWebGLContexts - 1);
+    if (liveWebGLContexts >= MAX_SAFE_LIVE_CONTEXTS) {
+      try {
+        this.renderer.forceContextLoss();
+      } catch {
+        // some headless / mocked renderers don't implement it - safe to ignore
+      }
     }
     this.renderer.dispose();
   }

@@ -511,7 +511,26 @@ function PageLoadingInline() {
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const storageLoaded = useAuthStore((s) => s.storageLoaded);
   const location = useLocation();
+  const [waitingForTabSession, setWaitingForTabSession] = useState(false);
+
+  useEffect(() => {
+    if (isAuthenticated || !storageLoaded) return;
+    setWaitingForTabSession(true);
+    try {
+      localStorage.setItem('oe_auth_sync_request', `${Date.now()}-${Math.random()}`);
+    } catch {
+      // localStorage unavailable -- fall through to login after the grace wait.
+    }
+    const id = window.setTimeout(() => setWaitingForTabSession(false), 650);
+    return () => window.clearTimeout(id);
+  }, [isAuthenticated, storageLoaded, location.pathname, location.search]);
+
+  if (!storageLoaded || waitingForTabSession) {
+    return <LoadingScreen />;
+  }
+
   if (!isAuthenticated) {
     // Preserve intended destination so the user lands where they wanted
     // after signing in (BUG-047). Avoids the "bookmarked /boq then sent

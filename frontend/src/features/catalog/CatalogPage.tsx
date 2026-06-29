@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -35,6 +35,7 @@ import { Button, Card, Badge, ConfirmDialog, EmptyState, Skeleton, DismissibleIn
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { catalogGuide } from './catalogGuide';
 import { CategoryCombobox } from './CategoryCombobox';
+import { ResourceTypeCombobox } from './ResourceTypeCombobox';
 import { useConfirm } from '@/shared/hooks/useConfirm';
 import { apiGet, apiPost, apiPatch, apiPut, apiDelete } from '@/shared/lib/api';
 import { getIntlLocale } from '@/shared/lib/formatters';
@@ -47,7 +48,16 @@ import {
   type CreateComponentData,
   type ResourceType,
 } from '@/features/assemblies/api';
-import { getResourceTypeLabel } from '@/features/boq/boqResourceTypes';
+import {
+  getCatalogResourceTypes,
+  getResourceTypeLabel,
+  readStoredResourceTypes,
+  resourceTypeFromApi,
+  resourceTypeToApiPayload,
+  writeStoredResourceTypes,
+  type ResourceTypeApiResource,
+  type ResourceTypeOption,
+} from '@/shared/lib/resourceTypes';
 import { copyToClipboard } from '@/shared/lib/browser';
 
 /* ── Types ─────────────────────────────────────────────────────────────── */
@@ -112,6 +122,7 @@ interface SelectedResourceEntry {
 
 const PAGE_SIZE = 20;
 const CUSTOM_CATEGORIES_STORAGE_KEY = 'oce.catalog.customCategories';
+const CUSTOM_CATEGORY_CODES_STORAGE_KEY = 'oce.catalog.categoryCodes';
 
 interface TypeTabConfig {
   key: string;
@@ -141,6 +152,28 @@ function writeStoredCustomCategories(categories: string[]) {
     .filter((value, index, arr) => value && arr.indexOf(value) === index)
     .sort((a, b) => a.localeCompare(b));
   window.localStorage.setItem(CUSTOM_CATEGORIES_STORAGE_KEY, JSON.stringify(clean));
+}
+
+function readStoredCategoryCodes(): Record<string, string> {
+  if (typeof window === 'undefined') return {};
+  try {
+    const raw = window.localStorage.getItem(CUSTOM_CATEGORY_CODES_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return {};
+    return Object.fromEntries(
+      Object.entries(parsed)
+        .map(([key, value]) => [key.trim(), String(value).replace(/\D/g, '').slice(0, 2).padStart(2, '0')])
+        .filter(([key, value]) => key && value),
+    );
+  } catch {
+    return {};
+  }
+}
+
+function writeStoredCategoryCodes(codes: Record<string, string>) {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem(CUSTOM_CATEGORY_CODES_STORAGE_KEY, JSON.stringify(codes));
 }
 
 const TYPE_TABS: TypeTabConfig[] = [
@@ -221,21 +254,9 @@ function buildSearchUrl(
   return `/v1/catalog/?${params.toString()}`;
 }
 
-// Catalog resource_type is a free string; the assembly component column is a
-// constrained enum. Narrow to the known set so we only send valid values.
-const COMPONENT_RESOURCE_TYPES: ReadonlySet<ResourceType> = new Set<ResourceType>([
-  'material',
-  'labor',
-  'equipment',
-  'operator',
-  'subcontractor',
-  'overhead',
-]);
-
 function toComponentResourceType(value: string): ResourceType | undefined {
-  return COMPONENT_RESOURCE_TYPES.has(value as ResourceType)
-    ? (value as ResourceType)
-    : undefined;
+  const clean = value.trim();
+  return clean ? clean : undefined;
 }
 
 /* ── Number formatting ─────────────────────────────────────────────────── */
@@ -1334,6 +1355,13 @@ function BuildAssemblyModal({
           unit_cost: Number(entry.resource.base_price),
           quantity: entry.quantity,
           factor: 1.0,
+          metadata: {
+            resource_type: toComponentResourceType(entry.resource.resource_type),
+            resource_type_code: entry.resource.specifications?.resource_type_code,
+            resource_type_name: entry.resource.specifications?.resource_type_name,
+            resource_type_badge: entry.resource.specifications?.resource_type_badge,
+            calculation_group: entry.resource.specifications?.calculation_group,
+          },
         };
         await assembliesApi.addComponent(assembly.id, componentData);
       }
@@ -3145,9 +3173,73 @@ function ResourceFormModal({
     retry: false,
     staleTime: 60_000,
   });
+  const { data: serverResourceTypes } = useQuery({
+    queryKey: ['catalog', 'resource-types'],
+    queryFn: () => apiGet<ResourceTypeApiResource[]>('/v1/catalog/resource-types/'),
+    retry: false,
+    staleTime: 60_000,
+  });
+  const [customResourceTypes, setCustomResourceTypes] = useState<ResourceTypeOption[]>(() =>
+    readStoredResourceTypes(),
+  );
+  useEffect(() => {
+    if (!serverResourceTypes?.length) return;
+    const next = serverResourceTypes.map(resourceTypeFromApi);
+    setCustomResourceTypes(next);
+    writeStoredResourceTypes(next);
+  }, [serverResourceTypes]);
+  const resourceTypeOptions = useMemo(() => {
+    const byValue = new Map<string, ResourceTypeOption>(
+      getCatalogResourceTypes(customResourceTypes).map((type) => [type.value, type]),
+    );
+    if (form.resource_type && !byValue.has(form.resource_type)) {
+      byValue.set(form.resource_type, {
+        value: form.resource_type,
+        code: '99',
+        name: form.resource_type,
+        calculationGroup: 'generic',
+        badge: 'OT',
+      });
+    }
+    return Array.from(byValue.values()).sort((a, b) => a.code.localeCompare(b.code));
+  }, [customResourceTypes, form.resource_type]);
+  const resourceTypeCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const stat of categoryStats?.by_type ?? []) {
+      counts[stat.resource_type] = stat.count;
+    }
+    return counts;
+  }, [categoryStats?.by_type]);
+  const selectedResourceType = resourceTypeOptions.find((type) => type.value === form.resource_type);
+  const persistCustomResourceTypes = useCallback((next: ResourceTypeOption[]) => {
+    setCustomResourceTypes(next);
+    writeStoredResourceTypes(next);
+  }, []);
   const [customCategories, setCustomCategories] = useState<string[]>(() =>
     readStoredCustomCategories(),
   );
+  const [categoryCodes, setCategoryCodes] = useState<Record<string, string>>(() =>
+    readStoredCategoryCodes(),
+  );
+  const assignCategoryCode = useCallback((name: string) => {
+    const trimmed = name.trim();
+    if (!trimmed) return '';
+    const existing = categoryCodes[trimmed];
+    if (existing) return existing;
+    const used = new Set(Object.values(categoryCodes));
+    let nextCode = '01';
+    for (let i = 1; i <= 99; i += 1) {
+      const candidate = String(i).padStart(2, '0');
+      if (!used.has(candidate)) {
+        nextCode = candidate;
+        break;
+      }
+    }
+    const next = { ...categoryCodes, [trimmed]: nextCode };
+    setCategoryCodes(next);
+    writeStoredCategoryCodes(next);
+    return nextCode;
+  }, [categoryCodes]);
   const categoryOptions = (() => {
     const byName = new Map<string, number>();
     for (const stat of categoryStats?.by_category ?? []) {
@@ -3160,9 +3252,46 @@ function ResourceFormModal({
       byName.set(form.category, 0);
     }
     return Array.from(byName.entries())
-      .map(([category, count]) => ({ category, count }))
+      .map(([category, count], index) => ({
+        category,
+        count,
+        code: categoryCodes[category] ?? String(index + 1).padStart(2, '0'),
+      }))
       .sort((a, b) => a.category.localeCompare(b.category));
   })();
+  const selectedCategoryCode =
+    form.category.trim()
+      ? categoryOptions.find((cat) => cat.category === form.category)?.code ?? '--'
+      : '--';
+  const codePrefix =
+    selectedResourceType?.code && selectedCategoryCode !== '--'
+      ? `${selectedResourceType.code}${selectedCategoryCode}`
+      : '';
+  const { data: sequenceData } = useQuery({
+    queryKey: ['catalog', 'resource-sequence', codePrefix, form.resource_type, form.category],
+    queryFn: () =>
+      apiGet<CatalogSearchResponse>(
+        `/v1/catalog/?resource_type=${encodeURIComponent(form.resource_type)}&category=${encodeURIComponent(form.category)}&region=CUSTOM&limit=100`,
+      ),
+    enabled: !resource && Boolean(codePrefix && form.resource_type && form.category.trim()),
+    retry: false,
+    staleTime: 10_000,
+  });
+  const maxExistingSequence = useMemo(() => {
+    if (!codePrefix) return 0;
+    return Math.max(
+      0,
+      ...(sequenceData?.items ?? [])
+        .map((item) => item.resource_code)
+        .filter((code) => code.startsWith(codePrefix))
+        .map((code) => Number(code.slice(codePrefix.length)))
+        .filter((seq) => Number.isInteger(seq) && seq > 0),
+    );
+  }, [codePrefix, sequenceData?.items]);
+  const nextSequence = resource
+    ? resource.resource_code.slice(-6)
+    : String(maxExistingSequence + 1).padStart(6, '0');
+  const generatedResourceCode = resource?.resource_code || (codePrefix ? `${codePrefix}${nextSequence}` : '----000001');
 
   const rememberCustomCategory = useCallback((name: string) => {
     const trimmed = name.trim();
@@ -3173,14 +3302,21 @@ function ResourceFormModal({
       }
       const next = [...prev, trimmed];
       writeStoredCustomCategories(next);
+      assignCategoryCode(trimmed);
       return next;
     });
-  }, []);
+  }, [assignCategoryCode]);
 
   const forgetCustomCategory = useCallback((name: string) => {
     setCustomCategories((prev) => {
       const next = prev.filter((cat) => cat !== name);
       writeStoredCustomCategories(next);
+      setCategoryCodes((prevCodes) => {
+        const rest = { ...prevCodes };
+        delete rest[name];
+        writeStoredCategoryCodes(rest);
+        return rest;
+      });
       return next;
     });
   }, []);
@@ -3251,7 +3387,6 @@ function ResourceFormModal({
     e.target.value = '';
   };
 
-  const TYPES = ['material', 'labor', 'equipment', 'operator', 'subcontractor', 'overhead'];
   // ISO 4217 currency codes - includes all Latin American currencies
   const CURRENCIES = [
     { value: 'EUR', label: 'EUR - Unión Europea' },
@@ -3274,9 +3409,6 @@ function ResourceFormModal({
     { value: 'PEN', label: 'PEN - Perú' },
     { value: 'UYU', label: 'UYU - Uruguay' },
   ];
-  const typeOptions = TYPES.includes(form.resource_type)
-    ? TYPES
-    : [form.resource_type, ...TYPES];
   const unitOptions = UNIT_KEYS.includes(form.unit) ? UNIT_KEYS : [form.unit, ...UNIT_KEYS];
   const currencyOptions = CURRENCIES.some((c) => c.value === form.currency)
     ? CURRENCIES
@@ -3298,13 +3430,37 @@ function ResourceFormModal({
         min_price: parseFloat(form.min_price) || parseFloat(form.base_price) || 0,
         max_price: parseFloat(form.max_price) || parseFloat(form.base_price) || 0,
         currency: form.currency,
-        specifications: { ...(resource?.specifications ?? {}), description: form.specifications.trim(), images, datasheets, ...(wastePct !== '' && wastePct !== null && wastePct !== undefined ? { waste_pct: Number(wastePct) } : {}), ...(laborRole ? { labor_role: laborRole } : {}), ...(dailyWage !== '' && dailyWage !== null && dailyWage !== undefined ? { daily_wage: Number(dailyWage) } : {}), ...(burdenPct !== '' && burdenPct !== null && burdenPct !== undefined ? { burden_pct: Number(burdenPct) } : {}), ...(fuelCostPerHour !== '' && fuelCostPerHour !== null && fuelCostPerHour !== undefined ? { fuel_cost_per_hour: Number(fuelCostPerHour) } : {}), ...(acquisitionValue !== '' && acquisitionValue !== null && acquisitionValue !== undefined ? { acquisition_value: Number(acquisitionValue) } : {}), ...(usefulLifeYears !== '' && usefulLifeYears !== null && usefulLifeYears !== undefined ? { useful_life_years: Number(usefulLifeYears) } : {}), ...(maintenancePct !== '' && maintenancePct !== null && maintenancePct !== undefined ? { maintenance_pct: Number(maintenancePct) } : {}), },
+        specifications: {
+          ...(resource?.specifications ?? {}),
+          description: form.specifications.trim(),
+          images,
+          datasheets,
+          resource_type_code: selectedResourceType?.code,
+          resource_type_name: selectedResourceType?.name,
+          resource_type_badge: selectedResourceType?.badge,
+          calculation_group: selectedResourceType?.calculationGroup ?? selectedResourceType?.value,
+          ...(wastePct !== '' && wastePct !== null && wastePct !== undefined ? { waste_pct: Number(wastePct) } : {}),
+          ...(laborRole ? { labor_role: laborRole } : {}),
+          ...(dailyWage !== '' && dailyWage !== null && dailyWage !== undefined ? { daily_wage: Number(dailyWage) } : {}),
+          ...(burdenPct !== '' && burdenPct !== null && burdenPct !== undefined ? { burden_pct: Number(burdenPct) } : {}),
+          ...(fuelCostPerHour !== '' && fuelCostPerHour !== null && fuelCostPerHour !== undefined ? { fuel_cost_per_hour: Number(fuelCostPerHour) } : {}),
+          ...(acquisitionValue !== '' && acquisitionValue !== null && acquisitionValue !== undefined ? { acquisition_value: Number(acquisitionValue) } : {}),
+          ...(usefulLifeYears !== '' && usefulLifeYears !== null && usefulLifeYears !== undefined ? { useful_life_years: Number(usefulLifeYears) } : {}),
+          ...(maintenancePct !== '' && maintenancePct !== null && maintenancePct !== undefined ? { maintenance_pct: Number(maintenancePct) } : {}),
+        },
+        metadata: {
+          ...(resource?.metadata_ ?? {}),
+          resource_type_code: selectedResourceType?.code,
+          resource_type_name: selectedResourceType?.name,
+          resource_type_badge: selectedResourceType?.badge,
+          calculation_group: selectedResourceType?.calculationGroup ?? selectedResourceType?.value,
+        },
       };
       if (resource) {
         await apiPatch(`/v1/catalog/${resource.id}`, payload);
       } else {
         await apiPost('/v1/catalog/', {
-        resource_code: `CAT-${form.resource_type.slice(0,3).toUpperCase()}-${Date.now().toString(36).toUpperCase().slice(-6)}`,
+        resource_code: generatedResourceCode,
         ...payload,
         usage_count: 0,
         source: 'manual',
@@ -3326,7 +3482,7 @@ function ResourceFormModal({
     } finally {
       setSubmitting(false);
     }
-  }, [form, resource, isEditing, addToast, t, onSaved, images, datasheets, wastePct, laborRole, dailyWage, burdenPct]);
+  }, [form, resource, isEditing, addToast, t, onSaved, images, datasheets, selectedResourceType, generatedResourceCode, wastePct, laborRole, dailyWage, burdenPct, fuelCostPerHour, acquisitionValue, usefulLifeYears, maintenancePct]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onClose}>
@@ -3383,6 +3539,17 @@ function ResourceFormModal({
           )}
           <div>
             <label className="text-xs font-medium text-content-secondary mb-1 block">
+              Codigo del recurso
+            </label>
+            <div className="rounded-lg border border-border-light bg-surface-secondary/50 px-3 py-2 text-center">
+              <div className="font-mono text-base font-semibold text-content-primary">
+                {generatedResourceCode}
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <label className="text-xs font-medium text-content-secondary mb-1 block">
               {t('catalog.name', { defaultValue: 'Name' })} *
             </label>
             <input
@@ -3395,14 +3562,82 @@ function ResourceFormModal({
 
           <div>
             <label className="text-xs font-medium text-content-secondary mb-1 block">{t('catalog.type_label', { defaultValue: 'Type' })}</label>
-            <select value={form.resource_type} onChange={(e) => setForm({ ...form, resource_type: e.target.value })}
-              className="h-9 w-full rounded-lg border border-border bg-surface-primary px-2 text-sm focus:outline-none focus:ring-2 focus:ring-oe-blue">
-              {typeOptions.map((type) => (
-                <option key={type} value={type}>
-                  {t(`catalog.type_${type}`, { defaultValue: type.charAt(0).toUpperCase() + type.slice(1) })}
-                </option>
-              ))}
-            </select>
+            <ResourceTypeCombobox
+              value={form.resource_type}
+              onChange={(type) => setForm({ ...form, resource_type: type })}
+              options={resourceTypeOptions}
+              counts={resourceTypeCounts}
+              onCreate={async (option) => {
+                  try {
+                    const created = await apiPost<ResourceTypeApiResource>(
+                      '/v1/catalog/resource-types/',
+                      resourceTypeToApiPayload(option),
+                    );
+                    const nextType = resourceTypeFromApi(created);
+                    persistCustomResourceTypes([...customResourceTypes, nextType]);
+                    queryClient.invalidateQueries({ queryKey: ['catalog', 'resource-types'] });
+                    addToast({
+                      type: 'success',
+                      title: `Tipo creado: ${nextType.code} ${nextType.name}`,
+                    });
+                  } catch (err) {
+                    addToast({
+                      type: 'error',
+                      title: 'No se pudo crear el tipo',
+                      message: err instanceof Error ? err.message : 'Failed',
+                    });
+                    throw err;
+                  }
+              }}
+              onRename={async (value, patch) => {
+                  try {
+                    const updated = await apiPatch<ResourceTypeApiResource>(
+                      `/v1/catalog/resource-types/${encodeURIComponent(value)}`,
+                      {
+                        code: patch.code,
+                        name: patch.name,
+                      },
+                    );
+                    const nextType = resourceTypeFromApi(updated);
+                    const next = customResourceTypes.map((type) =>
+                      type.value === value ? { ...type, ...nextType } : type,
+                    );
+                    persistCustomResourceTypes(next);
+                    queryClient.invalidateQueries({ queryKey: ['catalog', 'resource-types'] });
+                    addToast({
+                      type: 'success',
+                      title: `Tipo actualizado: ${nextType.code} ${nextType.name}`,
+                    });
+                  } catch (err) {
+                    addToast({
+                      type: 'error',
+                      title: 'No se pudo actualizar el tipo',
+                      message: err instanceof Error ? err.message : 'Failed',
+                    });
+                    throw err;
+                  }
+              }}
+              onDelete={async (value) => {
+                const current = resourceTypeOptions.find((type) => type.value === value);
+                  try {
+                    await apiDelete(`/v1/catalog/resource-types/${encodeURIComponent(value)}`);
+                    const next = customResourceTypes.filter((type) => type.value !== value);
+                    persistCustomResourceTypes(next);
+                    queryClient.invalidateQueries({ queryKey: ['catalog', 'resource-types'] });
+                    addToast({
+                      type: 'success',
+                      title: current ? `Tipo eliminado: ${current.code} ${current.name}` : 'Tipo eliminado',
+                    });
+                  } catch (err) {
+                    addToast({
+                      type: 'error',
+                      title: 'No se pudo eliminar el tipo',
+                      message: err instanceof Error ? err.message : 'Failed',
+                    });
+                    throw err;
+                  }
+              }}
+            />
           </div>
           <div>
             <label className="text-xs font-medium text-content-secondary mb-1 block">{t('catalog.category', { defaultValue: 'Category' })}</label>
@@ -3411,6 +3646,7 @@ function ResourceFormModal({
                 onChange={(cat) => {
                   setForm({ ...form, category: cat });
                   rememberCustomCategory(cat);
+                  assignCategoryCode(cat);
                 }}
                 categories={categoryOptions}
                 onRename={async (oldName, newName) => {
@@ -3423,6 +3659,14 @@ function ResourceFormModal({
                   }
                   forgetCustomCategory(oldName);
                   rememberCustomCategory(newName);
+                  setCategoryCodes((prevCodes) => {
+                    const oldCode = prevCodes[oldName] ?? categoryOptions.find((c) => c.category === oldName)?.code;
+                    const rest = { ...prevCodes };
+                    delete rest[oldName];
+                    const next = oldCode ? { ...rest, [newName]: oldCode } : rest;
+                    writeStoredCategoryCodes(next);
+                    return next;
+                  });
                   queryClient.invalidateQueries({ queryKey: ['catalog'] });
                   addToast({
                     type: 'success',

@@ -43,13 +43,20 @@ export function getIntlLocale(): string {
   return LOCALE_MAP[lang] || lang;
 }
 
+function clampFractionDigits(value: unknown, fallback = 2): number {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(20, Math.max(0, Math.trunc(n)));
+}
+
 /** Currency-style number formatter (e.g. 1,234.56) using current locale. */
 export function fmtNumber(value: number | string | null | undefined, decimals = 2): string {
   const n = typeof value === 'number' ? value : Number(value ?? 0);
   const safe = Number.isFinite(n) ? n : 0;
+  const digits = clampFractionDigits(decimals, 2);
   return new Intl.NumberFormat(getIntlLocale(), {
-    minimumFractionDigits: decimals,
-    maximumFractionDigits: decimals,
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
   }).format(safe);
 }
 
@@ -94,8 +101,11 @@ export function formatCurrencyDisplay(
   const safe = Number.isFinite(n) ? n : 0;
   const code = (currency || '').trim().toUpperCase();
   const locale = options.locale || getIntlLocale();
-  const min = options.minimumFractionDigits ?? (options.compact ? 0 : 2);
-  const max = options.maximumFractionDigits ?? (options.compact ? 1 : 2);
+  const min = clampFractionDigits(options.minimumFractionDigits, options.compact ? 0 : 2);
+  const max = Math.max(
+    min,
+    clampFractionDigits(options.maximumFractionDigits, options.compact ? 1 : 2),
+  );
   const numFmt = new Intl.NumberFormat(locale, {
     minimumFractionDigits: min,
     maximumFractionDigits: max,
@@ -189,9 +199,11 @@ function _fmtUnit(
   decimals = 2,
 ): string {
   if (value === null || value === undefined || !Number.isFinite(value)) return EM_DASH;
+  const min = clampFractionDigits(decimals, 2);
+  const max = Math.max(min, Math.min(20, Math.max(min, 4)));
   const num = new Intl.NumberFormat(locale, {
-    minimumFractionDigits: decimals,
-    maximumFractionDigits: Math.max(decimals, 4),
+    minimumFractionDigits: min,
+    maximumFractionDigits: max,
   }).format(value);
   return `${num} ${unit}`;
 }

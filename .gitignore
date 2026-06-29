@@ -392,3 +392,11 @@ frontend/scripts/_workflow-walk.mjs
 frontend/scripts/_shot-*.mjs
 frontend/scripts/_import-map-*.mjs
 frontend/scripts/_i18n_*.py
+
+# Scratch / temporary working files (session 2026-06-28)
+/_fix*.py
+/_patch*.py
+/_log_final.txt
+/_x.txt
+/_backups/
+frontend/tsc_errors.txt

@@ -54,6 +54,9 @@ from app.dependencies import (
 from app.modules.catalog.schemas import (
     CatalogResourceCreate,
     CatalogResourceResponse,
+    CatalogResourceTypeCreate,
+    CatalogResourceTypeResponse,
+    CatalogResourceTypeUpdate,
     CatalogResourceUpdate,
     CatalogSearchResponse,
     CatalogStatsResponse,
@@ -735,6 +738,50 @@ async def delete_catalog_category(
     reassigned = await repo.delete_category(name, reassign_to=reassign_to)
     logger.info("Category deleted: %s -> %s (%d resources reassigned)", name, reassign_to, reassigned)
     return CategoryDeleteResponse(deleted=True, reassigned=reassigned, reassigned_to=reassign_to)
+
+
+@router.get("/resource-types/", response_model=list[CatalogResourceTypeResponse])
+async def list_resource_types(
+    include_inactive: bool = Query(default=False),
+    service: CatalogResourceService = Depends(_get_service),
+    _user: OptionalUserPayload = None,
+) -> list[CatalogResourceTypeResponse]:
+    """List the catalog resource type registry used by catalog, assemblies and BOQ."""
+    rows = await service.list_resource_types(include_inactive=include_inactive)
+    return [CatalogResourceTypeResponse.model_validate(row) for row in rows]
+
+
+@router.post("/resource-types/", response_model=CatalogResourceTypeResponse, status_code=201)
+async def create_resource_type(
+    data: CatalogResourceTypeCreate,
+    service: CatalogResourceService = Depends(_get_service),
+    _user: str = Depends(RequirePermission("catalog.create")),
+) -> CatalogResourceTypeResponse:
+    """Create a custom catalog resource type."""
+    row = await service.create_resource_type(data)
+    return CatalogResourceTypeResponse.model_validate(row)
+
+
+@router.patch("/resource-types/{value}", response_model=CatalogResourceTypeResponse)
+async def update_resource_type(
+    value: str,
+    data: CatalogResourceTypeUpdate,
+    service: CatalogResourceService = Depends(_get_service),
+    _user: str = Depends(RequirePermission("catalog.update")),
+) -> CatalogResourceTypeResponse:
+    """Update a catalog resource type."""
+    row = await service.update_resource_type(value, data)
+    return CatalogResourceTypeResponse.model_validate(row)
+
+
+@router.delete("/resource-types/{value}", status_code=204)
+async def delete_resource_type(
+    value: str,
+    service: CatalogResourceService = Depends(_get_service),
+    _user: str = Depends(RequirePermission("catalog.delete")),
+) -> None:
+    """Soft-delete a custom catalog resource type."""
+    await service.delete_resource_type(value)
 
 
 # ── Single resource ───────────────────────────────────────────────────────

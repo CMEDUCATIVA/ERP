@@ -1,3 +1,10 @@
+import {
+  getAllResourceTypes,
+  getResourceTypeI18nKey as getSharedResourceTypeI18nKey,
+  getResourceTypeLabel as getSharedResourceTypeLabel,
+  readStoredResourceTypes,
+} from '@/shared/lib/resourceTypes';
+
 /**
  * Shared resource type definitions for compound BOQ positions.
  *
@@ -30,22 +37,15 @@ export const RESOURCE_TYPES: ResourceTypeOption[] = [
   { value: 'equipment', i18nKey: 'boq.resource_type_equipment', fallback: 'Equipment' },
   { value: 'operator', i18nKey: 'boq.resource_type_operator', fallback: 'Operator' },
   { value: 'subcontractor', i18nKey: 'boq.resource_type_subcontractor', fallback: 'Subcontractor' },
-  { value: 'electricity', i18nKey: 'boq.resource_type_electricity', fallback: 'Electricity' },
-  { value: 'composite', i18nKey: 'boq.resource_type_composite', fallback: 'Composite' },
-  { value: 'other', i18nKey: 'boq.resource_type_other', fallback: 'Other' },
 ];
 
-/**
- * Lookup table from resource-type value to its i18n key.
- *
- * Used by call sites that have a raw type string (e.g. coming from the
- * backend or from a catalog API response) and need to render a localised
- * label without mapping through the `RESOURCE_TYPES` array. Falls back
- * to a generic key so unknown values still get an i18n round-trip.
- */
-const RESOURCE_TYPE_KEY_MAP: Record<string, string> = Object.freeze(
-  Object.fromEntries(RESOURCE_TYPES.map((rt) => [rt.value, rt.i18nKey])),
-);
+export function getResourceTypeOptions(): ResourceTypeOption[] {
+  return getAllResourceTypes(readStoredResourceTypes()).map((type) => ({
+    value: type.value,
+    i18nKey: type.i18nKey ?? 'boq.resource_type_other',
+    fallback: type.fallback ?? type.name,
+  }));
+}
 
 /**
  * Resolve the i18n key for a given resource-type value.
@@ -54,7 +54,7 @@ const RESOURCE_TYPE_KEY_MAP: Record<string, string> = Object.freeze(
  * not a known canonical type so that translations always succeed.
  */
 export function getResourceTypeI18nKey(value: string): string {
-  return RESOURCE_TYPE_KEY_MAP[value] ?? 'boq.resource_type_other';
+  return getSharedResourceTypeI18nKey(value);
 }
 
 /**
@@ -72,8 +72,5 @@ export function getResourceTypeLabel(
   value: string,
   t?: (key: string, opts?: Record<string, string>) => string,
 ): string {
-  const opt = RESOURCE_TYPES.find((r) => r.value === value);
-  if (!opt) return value;
-  if (t) return t(opt.i18nKey, { defaultValue: opt.fallback });
-  return opt.fallback;
+  return getSharedResourceTypeLabel(value, t);
 }

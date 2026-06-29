@@ -252,10 +252,11 @@ test.describe('PDF Takeoff Q1 UX improvements', () => {
 
     await page.screenshot({ path: 'test-results/pdf-legend.png' });
 
-    // Clicking a legend row toggles group visibility.
+    // Only the eye icon toggles group visibility now (clicking the row body is
+    // inert, so a stray click can't wipe a whole group).
     const firstRow = rows.first();
     const group = await firstRow.getAttribute('data-group');
-    await firstRow.click();
+    await firstRow.locator('[data-testid="legend-eye-toggle"]').click();
     await page.waitForTimeout(150);
     const sameRow = legend.locator(`[data-testid="legend-row"][data-group="${group}"]`);
     await expect(sameRow).toBeVisible();

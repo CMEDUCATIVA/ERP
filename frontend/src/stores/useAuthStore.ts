@@ -31,6 +31,7 @@ function decodeRoleFromToken(token: string | null): string | null {
 interface AuthState {
   accessToken: string | null;
   isAuthenticated: boolean;
+  storageLoaded: boolean;
   userEmail: string | null;
   /**
    * The authoritative role for the current user, sourced from the live
@@ -65,6 +66,8 @@ const KEY_ACCESS = 'oe_access_token';
 const KEY_REFRESH = 'oe_refresh_token';
 const KEY_REMEMBER = 'oe_remember';
 const KEY_EMAIL = 'oe_user_email';
+const KEY_SYNC_REQUEST = 'oe_auth_sync_request';
+const KEY_SYNC_RESPONSE = 'oe_auth_sync_response';
 
 /** Read the stored refresh token from either storage tier. */
 function getStoredRefreshToken(): string | null {
@@ -82,6 +85,7 @@ let refreshInFlight: Promise<string | null> | null = null;
 export const useAuthStore = create<AuthState>((set, get) => ({
   accessToken: null,
   isAuthenticated: false,
+  storageLoaded: false,
   userEmail: null,
   userRole: null,
 
@@ -94,10 +98,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       sessionStorage.removeItem(KEY_REFRESH);
     } else {
       localStorage.removeItem(KEY_REMEMBER);
-      localStorage.removeItem(KEY_ACCESS);
-      localStorage.removeItem(KEY_REFRESH);
-      sessionStorage.setItem(KEY_ACCESS, access);
-      sessionStorage.setItem(KEY_REFRESH, refresh);
+      // Keep the active browser session visible to new tabs. sessionStorage is
+      // tab-scoped, so opening a protected route with Ctrl/Cmd+click would
+      // otherwise boot as unauthenticated and redirect to /login.
+      localStorage.setItem(KEY_ACCESS, access);
+      localStorage.setItem(KEY_REFRESH, refresh);
+      sessionStorage.removeItem(KEY_ACCESS);
+      sessionStorage.removeItem(KEY_REFRESH);
     }
     if (email) localStorage.setItem(KEY_EMAIL, email);
     set({
@@ -124,16 +131,26 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     } catch {
       // sessionStorage unavailable -- ignore.
     }
-    set({ accessToken: null, isAuthenticated: false, userEmail: null, userRole: null });
+    set({ accessToken: null, isAuthenticated: false, storageLoaded: true, userEmail: null, userRole: null });
   },
 
   loadFromStorage: () => {
-    const token =
-      localStorage.getItem(KEY_ACCESS) || sessionStorage.getItem(KEY_ACCESS);
+    const localToken = localStorage.getItem(KEY_ACCESS);
+    const localRefresh = localStorage.getItem(KEY_REFRESH);
+    const sessionToken = sessionStorage.getItem(KEY_ACCESS);
+    const sessionRefresh = sessionStorage.getItem(KEY_REFRESH);
+    const token = localToken || sessionToken;
+    if (!localToken && sessionToken && sessionRefresh) {
+      localStorage.setItem(KEY_ACCESS, sessionToken);
+      localStorage.setItem(KEY_REFRESH, sessionRefresh);
+      sessionStorage.removeItem(KEY_ACCESS);
+      sessionStorage.removeItem(KEY_REFRESH);
+    }
     const email = localStorage.getItem(KEY_EMAIL);
     set({
       accessToken: token,
       isAuthenticated: Boolean(token),
+      storageLoaded: true,
       userEmail: email,
       // Pre-populate from JWT so the UI renders immediately; syncRoleFromServer
       // will overwrite with the authoritative DB value shortly after.
@@ -205,3 +222,43 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     return refreshInFlight;
   },
 }));
+
+function installCrossTabAuthSync() {
+  if (typeof window === 'undefined') return;
+  window.addEventListener('storage', (event) => {
+    if (event.key === KEY_SYNC_REQUEST && event.newValue) {
+      const access = localStorage.getItem(KEY_ACCESS) || sessionStorage.getItem(KEY_ACCESS);
+      const refresh = localStorage.getItem(KEY_REFRESH) || sessionStorage.getItem(KEY_REFRESH);
+      if (!access || !refresh) return;
+      localStorage.setItem(
+        KEY_SYNC_RESPONSE,
+        JSON.stringify({
+          access,
+          refresh,
+          email: localStorage.getItem(KEY_EMAIL),
+          nonce: event.newValue,
+          ts: Date.now(),
+        }),
+      );
+      return;
+    }
+
+    if (event.key === KEY_SYNC_RESPONSE && event.newValue) {
+      const hasToken = localStorage.getItem(KEY_ACCESS) || sessionStorage.getItem(KEY_ACCESS);
+      if (hasToken) return;
+      try {
+        const data = JSON.parse(event.newValue) as {
+          access?: string;
+          refresh?: string;
+          email?: string | null;
+        };
+        if (!data.access || !data.refresh) return;
+        useAuthStore.getState().setTokens(data.access, data.refresh, false, data.email ?? undefined);
+      } catch {
+        // Ignore malformed cross-tab payloads.
+      }
+    }
+  });
+}
+
+installCrossTabAuthSync();

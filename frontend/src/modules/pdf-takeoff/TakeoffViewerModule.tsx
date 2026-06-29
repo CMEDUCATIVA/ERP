@@ -3,6 +3,7 @@
 // Copyright (c) 2026 Artem Boiko / DataDrivenConstruction
 // DDC-CWICR-OE-2026
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import * as pdfjsLib from 'pdfjs-dist';
 import {
@@ -293,6 +294,9 @@ interface TakeoffViewerModuleProps {
   initialPdfUrl?: string;
   /** Optional filename to associate with the pre-loaded PDF (used for persistence key). */
   initialPdfName?: string;
+  /** Optional takeoff document UUID — used as document_id for measurements so
+   *  two documents with the same filename don't share measurements. */
+  initialDocId?: string;
   /** Optional measurement id to auto-select + scroll-to once the measurement
    *  list lands (used by the /markups → /takeoff deep-link). Matches either
    *  the frontend id or the server-side UUID. */
@@ -302,14 +306,24 @@ interface TakeoffViewerModuleProps {
   recentDocuments?: RecentTakeoffDocument[];
   /** Open one of the recent documents in the viewer (parent owns navigation). */
   onOpenRecentDocument?: (docId: string) => void;
+  /** Called when a PDF is loaded locally (drop or "Load new PDF") so the
+   *  parent can upload it through the persistent project-doc flow. */
+  onLocalFileOpened?: (file: File) => void;
+}
+
+function takeoffDocumentIdFromUrl(url?: string): string | null {
+  const match = url?.match(/\/takeoff\/documents\/([^/?#]+)\/(?:download|recognize)/);
+  return match?.[1] ? decodeURIComponent(match[1]) : null;
 }
 
 export default function TakeoffViewerModule({
   initialPdfUrl,
   initialPdfName,
+  initialDocId,
   initialMeasurementId,
   recentDocuments,
   onOpenRecentDocument,
+  onLocalFileOpened,
 }: TakeoffViewerModuleProps = {}) {
   const { t } = useTranslation();
 
@@ -497,6 +511,8 @@ export default function TakeoffViewerModule({
 
   // Document persistence + server sync
   const [fileName, setFileName] = useState<string | null>(null);
+  // Takeoff document UUID — derived from prop, always in sync.
+  const documentId = initialDocId ?? null;
   // Per-page text-layer audit (8.2.0). When a document was opened from the
   // server we fetch its metadata to learn how many pages came back with no
   // text layer (likely scanned drawings that need OCR) so the viewer can flag
@@ -512,12 +528,18 @@ export default function TakeoffViewerModule({
   const [isExportingXlsx, setIsExportingXlsx] = useState(false);
   const { hasPersistedData, saveNow, clearPersisted, syncing, syncedToServer } = useMeasurementPersistence({
     fileName,
+    documentId,
     measurements,
-    setMeasurements: (ms) => setMeasurements(ms),
+    // Pass the React state setters DIRECTLY (they are stable across renders).
+    // Wrapping them in fresh arrows (`(ms) => setMeasurements(ms)`) made them
+    // change identity every render, which re-ran the hook's load effect and
+    // CANCELLED the in-flight server load before it could apply the result —
+    // the measurements were fetched (returned=7) but never shown (D-TKC-UP09).
+    setMeasurements,
     // Per-page scale: the hook persists the whole page-scale model and
     // migrates a legacy single-scale document into the default on load.
     pageScales,
-    setPageScales: (ps) => setPageScales(ps),
+    setPageScales,
     // The current page's effective scale is still sent on each measurement
     // (scale_pixels_per_unit) so the server-side B8 recompute uses the same
     // ratio the row was drawn at.
@@ -564,6 +586,7 @@ export default function TakeoffViewerModule({
       setTotalPages(doc.numPages);
       setCurrentPage(1);
       setFileName(file.name); // Triggers persistence hook to load saved measurements
+      onLocalFileOpened?.(file); // Notify parent so it persists the document
       setActivePoints([]);
       undoStackRef.current = [];
       redoStackRef.current = [];
@@ -586,7 +609,7 @@ export default function TakeoffViewerModule({
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [addToast, onLocalFileOpened, t]);
 
   /* ── Reset cross-page in-progress state on page change ───────────
    * Without this, an in-progress drawing (one click placed) on page 1,
@@ -679,7 +702,7 @@ export default function TakeoffViewerModule({
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialPdfUrl, initialPdfName]);
+  }, [initialPdfUrl, initialPdfName, initialDocId]);
 
   /* ── Fetch server-side document metadata (text-layer audit) ───────── */
   // When a PDF is opened from the server (filmstrip / deep link) the URL is
@@ -691,13 +714,12 @@ export default function TakeoffViewerModule({
     setNoTextLayer(null);
     setNoTextBannerDismissed(false);
     if (!initialPdfUrl) return;
-    const match = initialPdfUrl.match(/\/documents\/([^/?#]+)/);
-    const docId = match?.[1];
+    const docId = takeoffDocumentIdFromUrl(initialPdfUrl);
     if (!docId) return;
     let cancelled = false;
     (async () => {
       try {
-        const meta = await takeoffApi.getDocument(decodeURIComponent(docId));
+        const meta = await takeoffApi.getDocument(docId);
         if (cancelled || !meta) return;
         const count = meta.pages_without_text ?? 0;
         if (count > 0) {
@@ -710,17 +732,23 @@ export default function TakeoffViewerModule({
     return () => { cancelled = true; };
   }, [initialPdfUrl]);
 
-  /* ── Warn on unsaved changes (tab close / navigation) ────────────── */
-
+  /* ── Warn on unsaved changes (tab close / navigation) ──────────────
+   * Only nag when there is genuinely UNSYNCED work. Every measurement
+   * auto-syncs to the server (debounced), so a board that is already
+   * "Synced" must not show the browser's "changes won't be saved" dialog —
+   * doing so made users think nothing persists even though it did. The
+   * dialog now appears only while a sync is pending or has failed
+   * (``syncedToServer === false``), which is the one moment a refresh could
+   * actually drop the last action. */
   useEffect(() => {
-    if (measurements.length === 0) return;
+    if (measurements.length === 0 || syncedToServer) return;
     const handler = (e: BeforeUnloadEvent) => {
       e.preventDefault();
       e.returnValue = '';
     };
     window.addEventListener('beforeunload', handler);
     return () => window.removeEventListener('beforeunload', handler);
-  }, [measurements.length]);
+  }, [measurements.length, syncedToServer]);
 
   /* ── First-measurement-without-calibration warning ───────────────── */
   // Fires exactly once per session: when the user creates their first
@@ -2566,13 +2594,16 @@ export default function TakeoffViewerModule({
   }, [measurements, scale, exportProjectName, addToast, t]);
 
   const deleteMeasurement = useCallback((id: string) => {
-    setMeasurements((prev) => {
-      const target = prev.find((m) => m.id === id);
-      if (target) {
-        pushUndo({ kind: 'delete_measurement', measurement: { ...target, points: [...target.points] } });
+    const target = measurementsRef.current.find((m) => m.id === id);
+    if (target) {
+      pushUndo({ kind: 'delete_measurement', measurement: { ...target, points: [...target.points] } });
+      // Persist the deletion: remove the server row too, otherwise a refresh
+      // reloads it from the backend (D-TKC-UP14). Best-effort.
+      if (target.serverId) {
+        void takeoffApi.delete(target.serverId).catch(() => { /* next load reconciles */ });
       }
-      return prev.filter((m) => m.id !== id);
-    });
+    }
+    setMeasurements((prev) => prev.filter((m) => m.id !== id));
     // Clear selection if the deleted measurement was selected.
     setSelectedMeasurementId((cur) => (cur === id ? null : cur));
   }, [pushUndo]);
@@ -2593,7 +2624,7 @@ export default function TakeoffViewerModule({
     if (recognizeBusy) return;
     // The server reads the stored PDF off disk, so it needs the document's
     // id, which the deep-link download URL carries.
-    const docId = initialPdfUrl?.match(/\/documents\/([^/?#]+)\/(?:download|recognize)/)?.[1];
+    const docId = takeoffDocumentIdFromUrl(initialPdfUrl);
     if (!docId) {
       addToast({
         type: 'info',
@@ -2700,7 +2731,7 @@ export default function TakeoffViewerModule({
    *  reviews and accepts (human-confirmed). Never auto-applies. */
   const handleReadWithAi = useCallback(async () => {
     if (planReadBusy) return;
-    const docId = initialPdfUrl?.match(/\/documents\/([^/?#]+)\/(?:download|recognize)/)?.[1];
+    const docId = takeoffDocumentIdFromUrl(initialPdfUrl);
     const projectId = selectedProjectId || activeProjectId || '';
     if (!docId || !projectId) {
       addToast({
@@ -2917,6 +2948,11 @@ export default function TakeoffViewerModule({
   }, [selectedBoqId, measurements, addToast, t]);
 
   const clearAll = useCallback(() => {
+    // Persist: delete every synced measurement from the server too, else they
+    // reload on refresh (D-TKC-UP14).
+    for (const m of measurementsRef.current) {
+      if (m.serverId) void takeoffApi.delete(m.serverId).catch(() => { /* ignore */ });
+    }
     setMeasurements([]);
     setActivePoints([]);
     undoStackRef.current = [];
@@ -3073,7 +3109,7 @@ export default function TakeoffViewerModule({
           ...existingMeta,
           pdf_measurement_source: sourceLabel,
           pdf_measurement_id: measurement.serverId ?? measurement.id,
-          pdf_document_id: fileName ?? undefined,
+          pdf_document_id: documentId ?? fileName ?? undefined,
           pdf_page: measurement.page,
         },
       });
@@ -3171,7 +3207,7 @@ export default function TakeoffViewerModule({
           metadata: {
             pdf_measurement_source: `Takeoff: ${measurement.annotation || measurement.type} (page ${measurement.page})`,
             pdf_measurement_id: measurement.serverId ?? measurement.id,
-            pdf_document_id: fileName ?? undefined,
+            pdf_document_id: documentId ?? fileName ?? undefined,
             pdf_page: measurement.page,
           },
         });
@@ -3367,7 +3403,7 @@ export default function TakeoffViewerModule({
           takeoff_raw_unit: m.unit,
           pdf_measurement_source: `Takeoff: ${m.annotation || m.type} (page ${m.page})`,
           pdf_measurement_id: m.serverId ?? m.id,
-          pdf_document_id: fileName ?? undefined,
+          pdf_document_id: documentId ?? fileName ?? undefined,
           pdf_page: m.page,
         },
       }));
@@ -3503,8 +3539,9 @@ export default function TakeoffViewerModule({
         break;
 
       case 'delete_measurement':
-        // Restore the deleted measurement
-        setMeasurements((prev) => [...prev, op.measurement]);
+        // Restore the deleted measurement. Drop the stale serverId (its row was
+        // deleted on the server) so the auto-sync re-creates it (D-TKC-UP14).
+        setMeasurements((prev) => [...prev, { ...op.measurement, serverId: undefined }]);
         break;
 
       case 'change_annotation': {
@@ -3597,10 +3634,14 @@ export default function TakeoffViewerModule({
         }
         break;
 
-      case 'delete_measurement':
+      case 'delete_measurement': {
+        // Re-delete: also remove the (re-created) server row (D-TKC-UP14).
+        const cur = measurementsRef.current.find((m) => m.id === op.measurement.id);
+        if (cur?.serverId) void takeoffApi.delete(cur.serverId).catch(() => { /* ignore */ });
         setMeasurements((prev) => prev.filter((m) => m.id !== op.measurement.id));
         setSelectedMeasurementId((sel) => (sel === op.measurement.id ? null : sel));
         break;
+      }
 
       case 'change_annotation': {
         // Swap annotations again — capture the current value so a
@@ -3725,11 +3766,13 @@ export default function TakeoffViewerModule({
           activeVertexRef.current = null;
           return;
         }
-        setMeasurements((prev) => {
-          const t2 = prev.find((m) => m.id === selectedMeasurementId);
-          if (t2) pushUndo({ kind: 'delete_measurement', measurement: t2 });
-          return prev.filter((m) => m.id !== selectedMeasurementId);
-        });
+        const delTarget = measurementsRef.current.find((m) => m.id === selectedMeasurementId);
+        if (delTarget) {
+          pushUndo({ kind: 'delete_measurement', measurement: delTarget });
+          // Persist the deletion server-side too (D-TKC-UP14).
+          if (delTarget.serverId) void takeoffApi.delete(delTarget.serverId).catch(() => { /* ignore */ });
+        }
+        setMeasurements((prev) => prev.filter((m) => m.id !== selectedMeasurementId));
         activeVertexRef.current = null;
         setSelectedMeasurementId(null);
         return;
@@ -4626,42 +4669,50 @@ export default function TakeoffViewerModule({
                           });
                         }
                       }
-                      return rows.map((row) => (
-                        <button
-                          key={row.name}
-                          type="button"
-                          onClick={() => toggleGroupVisibility(row.name)}
-                          className={clsx(
-                            'w-full flex items-center gap-2 px-2.5 py-1.5 text-left transition-colors hover:bg-surface-secondary',
-                            row.hidden && 'opacity-50',
-                          )}
-                          data-testid="legend-row"
-                          data-group={row.name}
-                          data-hidden={row.hidden}
-                          title={row.hidden
-                            ? t('takeoff_viewer.show_group', { defaultValue: 'Show group' })
-                            : t('takeoff_viewer.hide_group', { defaultValue: 'Hide group' })
-                          }
-                        >
-                          <span
-                            className="h-3 w-3 rounded-full shrink-0 ring-1 ring-white/40"
-                            style={{ backgroundColor: row.color }}
-                          />
-                          <span className="flex-1 text-[11px] font-semibold text-content-primary truncate">
-                            {row.name}
-                          </span>
-                          <span className="text-[10px] font-mono text-content-tertiary tabular-nums">
-                            {row.count}
-                          </span>
-                          <span className="text-[10px] font-mono text-content-secondary tabular-nums min-w-0">
-                            {formatGroupTotal(row.total, row.unit)}
-                          </span>
-                          {row.hidden
-                            ? <EyeOff size={10} className="text-content-tertiary shrink-0" />
-                            : <Eye size={10} className="text-content-tertiary shrink-0" />
-                          }
-                        </button>
-                      ));
+                      return rows.map((row) => {
+                        const toggleLabel = row.hidden
+                          ? t('takeoff_viewer.show_group', { defaultValue: 'Show group' })
+                          : t('takeoff_viewer.hide_group', { defaultValue: 'Hide group' });
+                        return (
+                          <div
+                            key={row.name}
+                            className={clsx(
+                              'w-full flex items-center gap-2 px-2.5 py-1.5 text-left',
+                              row.hidden && 'opacity-50',
+                            )}
+                            data-testid="legend-row"
+                            data-group={row.name}
+                            data-hidden={row.hidden}
+                          >
+                            <span
+                              className="h-3 w-3 rounded-full shrink-0 ring-1 ring-white/40"
+                              style={{ backgroundColor: row.color }}
+                            />
+                            <span className="flex-1 text-[11px] font-semibold text-content-primary truncate">
+                              {row.name}
+                            </span>
+                            <span className="text-[10px] font-mono text-content-tertiary tabular-nums">
+                              {row.count}
+                            </span>
+                            <span className="text-[10px] font-mono text-content-secondary tabular-nums min-w-0">
+                              {formatGroupTotal(row.total, row.unit)}
+                            </span>
+                            {/* Only the eye toggles visibility now. Previously the WHOLE row was
+                                the toggle, so a stray click on this overlay (it floats over the
+                                bottom-left of the plan) silently hid an entire group. */}
+                            <button
+                              type="button"
+                              onClick={() => toggleGroupVisibility(row.name)}
+                              className="shrink-0 -m-1 p-1 rounded text-content-tertiary transition-colors hover:bg-surface-secondary hover:text-content-primary"
+                              title={toggleLabel}
+                              aria-label={toggleLabel}
+                              data-testid="legend-eye-toggle"
+                            >
+                              {row.hidden ? <EyeOff size={10} /> : <Eye size={10} />}
+                            </button>
+                          </div>
+                        );
+                      });
                     })()}
                   </div>
                 </div>
@@ -5173,9 +5224,14 @@ export default function TakeoffViewerModule({
                           {measurementOnly.map((m) => (
                             <div
                               key={m.id}
-                              onClick={() => setSelectedMeasurementId((cur) => (cur === m.id ? null : m.id))}
+                              // No row-level onClick: clicking the body / value no longer
+                              // selects the measurement (that was firing the Properties
+                              // panel on a stray centre click). Selecting is done by
+                              // clicking the measurement on the plan; the row stays for
+                              // reading + the explicit edit / BOQ / delete buttons, and the
+                              // value text is freely selectable to copy.
                               className={clsx(
-                                'rounded-sm px-2 py-1 group/item transition-all cursor-pointer',
+                                'rounded-sm px-2 py-1 group/item transition-all',
                                 selectedMeasurementId === m.id
                                   ? 'bg-oe-blue/10 border border-oe-blue/40'
                                   : 'bg-surface-secondary/70 hover:bg-surface-secondary border border-transparent hover:border-border-light',
@@ -5213,10 +5269,12 @@ export default function TakeoffViewerModule({
                                       title={t('takeoff.add_label', { defaultValue: 'Add label...' })}
                                     >
                                       <span className="truncate">{m.annotation}</span>
-                                      <Pencil size={10} className="shrink-0 opacity-0 group-hover/item:opacity-60 transition-opacity" />
                                     </button>
                                   )}
-                                  <span className="text-2xs text-content-tertiary capitalize truncate shrink">
+                                  <span
+                                    className="text-2xs text-content-tertiary capitalize truncate shrink select-text cursor-text"
+                                    title={m.label}
+                                  >
                                     {m.label}
                                   </span>
                                   {m.suggested && (
@@ -5264,6 +5322,21 @@ export default function TakeoffViewerModule({
                                       </button>
                                     </>
                                   )}
+                                  {/* Open properties — explicit affordance for selecting
+                                      the measurement + revealing its Properties panel
+                                      (group / colour / deduction…). Renaming is done by
+                                      clicking the name, so the pencil here opens properties,
+                                      not the label editor. Order: [properties] [BOQ] [delete]. */}
+                                  <button
+                                    type="button"
+                                    onClick={(e) => { e.stopPropagation(); setSelectedMeasurementId((cur) => (cur === m.id ? null : m.id)); }}
+                                    className="p-0.5 rounded text-content-tertiary hover:text-oe-blue hover:bg-surface-secondary transition-colors shrink-0"
+                                    aria-label={t('takeoff_viewer.edit_properties', { defaultValue: 'Edit properties' })}
+                                    title={t('takeoff_viewer.edit_properties', { defaultValue: 'Edit properties' })}
+                                    data-testid="open-measurement-properties"
+                                  >
+                                    <Pencil size={12} />
+                                  </button>
                                   {/* Link to BOQ button — always visible (the primary
                                       per-measurement action). Linked rows get an emerald
                                       tint; unlinked rows get a rose tint that strengthens
@@ -5298,9 +5371,13 @@ export default function TakeoffViewerModule({
                                   </button>
                                 </div>
                               </div>
-                              {/* Link to BOQ picker — self-contained, no prerequisites */}
-                              {linkingMeasurementId === m.id && (
-                                <div className="mt-1.5 rounded-lg border border-rose-200 dark:border-rose-800/40 bg-rose-50/50 dark:bg-rose-950/20 p-2 animate-fade-in">
+                              {/* Link to BOQ picker — self-contained, no prerequisites.
+                                  Rendered as a fixed panel pinned to the right edge (only
+                                  one shows at a time, keyed by linkingMeasurementId) so the
+                                  picker has real width instead of being squeezed into the
+                                  narrow sidebar row (D-TKC-UP13). */}
+                              {linkingMeasurementId === m.id && containerRef.current && createPortal(
+                                <div className="absolute right-3 top-1/2 -translate-y-1/2 z-30 w-[380px] max-w-[calc(100%-1.5rem)] max-h-[calc(100%-1rem)] overflow-y-auto rounded-lg border border-rose-200 dark:border-rose-800/40 bg-surface-primary dark:bg-gray-900 shadow-2xl p-3 animate-fade-in">
                                   <div className="flex items-center justify-between mb-1.5">
                                     <span className="text-[10px] font-bold uppercase tracking-wider text-rose-700 dark:text-rose-400">
                                       {m.linkedPositionId
@@ -5363,7 +5440,7 @@ export default function TakeoffViewerModule({
                                     <select
                                       value={linkPickerProjectId}
                                       onChange={(e) => handlePickerProjectChange(e.target.value)}
-                                      className="text-[10px] rounded border border-border-subtle bg-surface-primary px-1 py-0.5 text-content-primary"
+                                      className="text-xs rounded border border-border-subtle bg-surface-primary px-2 py-1 text-content-primary"
                                     >
                                       <option value="">{t('takeoff.pick_project', { defaultValue: '- project -' })}</option>
                                       {linkPickerProjects.map((p) => (
@@ -5374,7 +5451,7 @@ export default function TakeoffViewerModule({
                                       value={linkPickerBoqId}
                                       onChange={(e) => handlePickerBoqChange(e.target.value)}
                                       disabled={!linkPickerProjectId || linkBoqsLoading}
-                                      className="text-[10px] rounded border border-border-subtle bg-surface-primary px-1 py-0.5 text-content-primary disabled:opacity-60"
+                                      className="text-xs rounded border border-border-subtle bg-surface-primary px-2 py-1 text-content-primary disabled:opacity-60"
                                     >
                                       <option value="">
                                         {linkBoqsLoading
@@ -5439,9 +5516,9 @@ export default function TakeoffViewerModule({
                                           value={linkPickerSearch}
                                           onChange={(e) => setLinkPickerSearch(e.target.value)}
                                           placeholder={t('takeoff.link_search_placeholder', { defaultValue: 'Search ordinal or description...' })}
-                                          className="w-full mb-1 text-[10px] rounded border border-border-subtle bg-surface-primary px-1.5 py-0.5 text-content-primary"
+                                          className="w-full mb-1.5 text-sm rounded border border-border-subtle bg-surface-primary px-2 py-1 text-content-primary"
                                         />
-                                        <div className="max-h-32 overflow-y-auto space-y-0.5">
+                                        <div className="max-h-80 overflow-y-auto space-y-0.5">
                                           {linkBoqPositions
                                             .filter((p) => p.unit)
                                             .filter((p) => {
@@ -5470,7 +5547,7 @@ export default function TakeoffViewerModule({
                                                   type="button"
                                                   onClick={() => handleLinkToPosition(m.id, pos)}
                                                   disabled={linkingInProgress}
-                                                  className="w-full text-left px-2 py-1 rounded text-[10px] hover:bg-rose-100 dark:hover:bg-rose-900/30 transition-colors flex items-center gap-1.5 disabled:opacity-50"
+                                                  className="w-full text-left px-2 py-1.5 rounded text-xs hover:bg-rose-100 dark:hover:bg-rose-900/30 transition-colors flex items-center gap-1.5 disabled:opacity-50"
                                                   title={
                                                     dimensionMismatch
                                                       ? t('takeoff.dimension_mismatch_row_hint', {
@@ -5537,7 +5614,8 @@ export default function TakeoffViewerModule({
                                       </button>
                                     </div>
                                   )}
-                                </div>
+                                </div>,
+                                containerRef.current,
                               )}
                             </div>
                           ))}

@@ -97,6 +97,12 @@ import { CustomColumnsDialog } from './CustomColumnsDialog';
 import { BOQVariablesDialog } from './BOQVariablesDialog';
 import { RenumberDialog } from './RenumberDialog';
 import { LinkedPositionsModal } from './LinkedPositionsModal';
+import {
+  getResourceTypeDefinition,
+  resourceTypeFromApi,
+  writeStoredResourceTypes,
+  type ResourceTypeApiResource,
+} from '@/shared/lib/resourceTypes';
 
 /* ── Re-exports for tests ────────────────────────────────────────────── */
 
@@ -168,6 +174,17 @@ export function BOQEditorPage() {
   });
 
   /* ── Load project for region/currency/locale settings ────────────── */
+
+  useQuery({
+    queryKey: ['catalog', 'resource-types'],
+    queryFn: async () => {
+      const rows = await apiGet<ResourceTypeApiResource[]>('/v1/catalog/resource-types/');
+      if (rows.length) writeStoredResourceTypes(rows.map(resourceTypeFromApi));
+      return rows;
+    },
+    retry: false,
+    staleTime: 60_000,
+  });
 
   const { data: project } = useQuery({
     queryKey: ['project', boq?.project_id],
@@ -3269,6 +3286,7 @@ export function BOQEditorPage() {
       const res = resources[resourceIndex];
       if (!res) return;
       try {
+        const typeDef = getResourceTypeDefinition(String(res.type ?? 'material'));
         const code = `MY-${((res.type as string) ?? 'OTH').toUpperCase().slice(0, 3)}-${Date.now().toString(36).toUpperCase()}`;
         await apiPost('/v1/catalog/', {
           resource_code: code,
@@ -3285,9 +3303,18 @@ export function BOQEditorPage() {
           specifications: {
             source_position: pos.description,
             source_boq_id: boqId,
+            resource_type_code: typeDef?.code,
+            resource_type_name: typeDef?.name,
+            resource_type_badge: typeDef?.badge,
+            calculation_group: typeDef?.calculationGroup ?? res.type,
             saved_at: new Date().toISOString(),
           },
-          metadata: {},
+          metadata: {
+            resource_type_code: typeDef?.code,
+            resource_type_name: typeDef?.name,
+            resource_type_badge: typeDef?.badge,
+            calculation_group: typeDef?.calculationGroup ?? res.type,
+          },
         });
         addToast({
           type: 'success',
@@ -3626,6 +3653,8 @@ export function BOQEditorPage() {
       if (!catalogForPositionId || !boq) return;
       const pos = boq.positions.find((p) => p.id === catalogForPositionId);
       if (!pos) return;
+      const typeDef = getResourceTypeDefinition(catalogRes.resource_type);
+      const catalogSpecs = catalogRes.specifications ?? {};
 
       const newResource = {
         name: catalogRes.name,
@@ -3635,6 +3664,12 @@ export function BOQEditorPage() {
         quantity: 1,
         unit_rate: catalogRes.base_price || 0,
         total: catalogRes.base_price || 0,
+        metadata: {
+          resource_type_code: catalogSpecs.resource_type_code ?? typeDef?.code,
+          resource_type_name: catalogSpecs.resource_type_name ?? typeDef?.name,
+          resource_type_badge: catalogSpecs.resource_type_badge ?? typeDef?.badge,
+          calculation_group: catalogSpecs.calculation_group ?? typeDef?.calculationGroup ?? catalogRes.resource_type,
+        },
       };
 
       const existing = [...((pos.metadata?.resources ?? []) as Array<Record<string, unknown>>)];
@@ -3698,6 +3733,7 @@ export function BOQEditorPage() {
         unit_rate: number;
         currency?: string;
         code?: string;
+        metadata?: Record<string, unknown>;
       },
     ) => {
       const pos = boq?.positions.find((p) => p.id === positionId);
@@ -3712,6 +3748,9 @@ export function BOQEditorPage() {
         quantity: resource.quantity,
         unit_rate: resource.unit_rate,
         ...(resource.currency ? { currency: resource.currency } : {}),
+        metadata: {
+          ...(resource.metadata ?? {}),
+        },
         total: Math.round(resource.quantity * resource.unit_rate * 100) / 100,
       };
       const existing = [...((pos.metadata?.resources ?? []) as Array<Record<string, unknown>>)];

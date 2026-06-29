@@ -1,4 +1,4 @@
-import { useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { useCallback, useContext, useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import { QueryClientContext } from '@tanstack/react-query';
 import { takeoffApi, type MeasurementCreate, type MeasurementResponse } from '@/features/takeoff/api';
 import {
@@ -6,6 +6,7 @@ import {
   hydratePageScales,
   scaleForPage,
 } from './data/page-scales';
+import { formatMeasurement } from './data/scale-helpers';
 
 /* ── Types (mirrored from TakeoffViewerModule) ──────────────────────── */
 
@@ -249,6 +250,55 @@ function toApiUpdate(m: Measurement, scale?: ScaleConfig): Partial<MeasurementCr
   };
 }
 
+/**
+ * Rebuild the value-formatted quantity string (the sidebar subtitle) for a
+ * measurement coming back from the server.
+ *
+ * The viewer fills ``label`` with the formatted quantity at draw time
+ * (`formatMeasurement(...)`), but only the *name* (``annotation``) is persisted
+ * as a text field — the quantity lives in the numeric columns
+ * (``measurement_value`` / ``perimeter`` / ``volume`` / ``depth`` /
+ * ``count_value``). Without rebuilding it here, a reloaded measurement showed
+ * its name twice ("Distance 6 / Distance 6") instead of "Distance 6 / 1.40 m"
+ * (D-TKC-UP11). We mirror the exact creation format per type. Annotation tools
+ * (cloud/arrow/text/…) carry no quantity — their row uses the type, not the
+ * label — so we return '' for them, matching draw-time behaviour.
+ */
+function reconstructValueLabel(r: MeasurementResponse): string {
+  const meta = r.metadata || {};
+  const unit = displayUnit(r.measurement_unit);
+  const base = unit.replace(/[²³]/g, '') || 'm'; // linear unit (perimeter / depth)
+  switch (r.type) {
+    case 'distance':
+    case 'polyline':
+      return formatMeasurement(r.measurement_value ?? 0, base);
+    case 'area': {
+      const area = formatMeasurement(r.measurement_value ?? 0, unit || `${base}²`);
+      const perim = r.perimeter != null ? formatMeasurement(r.perimeter, base) : '';
+      return area && perim ? `${area} (P: ${perim})` : area;
+    }
+    case 'volume': {
+      const vol = formatMeasurement(r.volume ?? r.measurement_value ?? 0, unit || `${base}³`);
+      const parts: string[] = [];
+      const areaVal = typeof meta.area === 'number' ? meta.area : null;
+      if (areaVal != null) {
+        const a = formatMeasurement(areaVal, `${base}²`);
+        if (a) parts.push(`A: ${a}`);
+      }
+      if (r.depth != null) {
+        const d = formatMeasurement(r.depth, base);
+        if (d) parts.push(`D: ${d}`);
+      }
+      if (!vol) return '';
+      return parts.length ? `V = ${vol} (${parts.join(' × ')})` : `V = ${vol}`;
+    }
+    case 'count':
+      return `${Math.round(r.count_value ?? r.measurement_value ?? 0)} ${unit || 'pcs'}`;
+    default:
+      return '';
+  }
+}
+
 function fromApiFormat(r: MeasurementResponse): Measurement {
   const meta = r.metadata || {};
   return {
@@ -258,7 +308,9 @@ function fromApiFormat(r: MeasurementResponse): Measurement {
     points: r.points as Point[],
     value: r.measurement_value ?? r.count_value ?? 0,
     unit: displayUnit(r.measurement_unit),
-    label: r.annotation || '',
+    // ``label`` is the formatted quantity shown as the row subtitle, rebuilt
+    // from the server's numeric fields; ``annotation`` is the editable name.
+    label: reconstructValueLabel(r),
     annotation: r.annotation || '',
     page: r.page,
     group: r.group_name,
@@ -318,8 +370,11 @@ function pageScalesFromServer(rows: MeasurementResponse[]): PageScales | null {
 
 interface UseMeasurementPersistenceOptions {
   fileName: string | null;
+  /** Takeoff document UUID — when present, used as server document_id instead
+   *  of fileName so two documents with the same name don't share measurements. */
+  documentId?: string | null;
   measurements: Measurement[];
-  setMeasurements: (measurements: Measurement[]) => void;
+  setMeasurements: Dispatch<SetStateAction<Measurement[]>>;
   /** Per-page (per-sheet) scale model. Persisted whole; a legacy
    *  single-scale document is migrated into the default on load. */
   pageScales: PageScales;
@@ -345,6 +400,7 @@ interface UseMeasurementPersistenceResult {
 
 export function useMeasurementPersistence({
   fileName,
+  documentId,
   measurements,
   setMeasurements,
   pageScales,
@@ -352,12 +408,40 @@ export function useMeasurementPersistence({
   scale,
   projectId,
 }: UseMeasurementPersistenceOptions): UseMeasurementPersistenceResult {
+  // Persistence key = the FILENAME, not the document UUID (D-TKC-UP09).
+  //
+  // Keying by the per-upload UUID meant that re-uploading or switching the same
+  // plan produced a brand-new id and the measurements drawn on the previous
+  // upload "disappeared" — the exact regression vs. the older filename-keyed
+  // build the user confirmed working. Filename is stable across re-uploads, so
+  // opening the same PDF always reloads its measurements. The READ side still
+  // ALSO queries by ``documentId`` (see the load below) so any rows written
+  // under a UUID by an earlier build are still found and merged in.
+  const serverDocId = fileName;
+  const localStorageKey = fileName;
+  // Identity for the "did the open document change?" guard. Includes the
+  // project so a project switch reloads. Now filename-based, so a UUID arriving
+  // after upload no longer changes the identity (no wipe, no churn).
+  const documentIdentity = fileName
+    ? `${projectId ?? ''}:${fileName}`
+    : null;
   const hasPersistedRef = useRef(false);
-  const lastFileRef = useRef<string | null>(null);
+  const lastDocumentRef = useRef<string | null>(null);
+  // The filename + documentId the load effect last committed to, used to tell
+  // a genuine document switch apart from the filename -> UUID re-key that
+  // happens when a just-dropped local PDF finishes uploading.
+  const lastFileNameRef = useRef<string | null>(null);
+  const lastDocumentIdRef = useRef<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [syncedToServer, setSyncedToServer] = useState(false);
   const serverSyncRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Guard against overlapping server syncs. A measurement stays serverId-less
+  // until its create returns, so a second sync firing mid-flight would re-send
+  // (and duplicate) the same rows. We skip while one is in flight; the
+  // serverId update that completes a sync re-triggers the auto-sync effect to
+  // flush anything still pending.
+  const inFlightSyncRef = useRef(false);
   // Reshape-PATCH tracking (#194 Feature 1). `geometrySigRef` remembers the
   // last geometry we know the server has for each `serverId`, so we only
   // PATCH a row whose geometry actually changed. `patchTimerRef` debounces
@@ -372,18 +456,91 @@ export function useMeasurementPersistence({
   // it to broadcast a refresh to the unified Markups hub.
   const qc = useContext(QueryClientContext);
 
-  // Load persisted data when file name changes — try server first, fallback to localStorage
+  // Load persisted data when the open document changes — try server first,
+  // fallback to localStorage. Special-cases the filename -> UUID "re-key" that
+  // fires when a freshly dropped local PDF finishes uploading: it migrates the
+  // localStorage copy and KEEPS the in-memory measurements (which still carry
+  // no serverId because sync was deferred) instead of wiping + reloading from a
+  // UUID the server has no rows for yet (D-TKC-UP07).
   useEffect(() => {
-    if (!fileName || fileName === lastFileRef.current) return;
-    lastFileRef.current = fileName;
+    if (!fileName || !documentIdentity || documentIdentity === lastDocumentRef.current) return;
+
+    const prevFileName = lastFileNameRef.current;
+    const prevDocumentId = lastDocumentIdRef.current;
+    // Re-key of the SAME document: same filename, and a UUID has just appeared
+    // where there was none. Migrate the localStorage entry to the UUID key and
+    // let the normal sync create the rows under the UUID. No wipe, no reload.
+    const isRekey =
+      lastDocumentRef.current !== null &&
+      prevFileName === fileName &&
+      !prevDocumentId &&
+      Boolean(documentId);
+
+    lastDocumentRef.current = documentIdentity;
+    lastFileNameRef.current = fileName;
+    lastDocumentIdRef.current = documentId ?? null;
+
+    if (isRekey) {
+      const oldKey = prevFileName; // was filename-keyed
+      const newKey = localStorageKey; // now UUID-keyed
+      if (oldKey && newKey && oldKey !== newKey) {
+        const saved = loadFromStorage(oldKey);
+        if (saved) {
+          saveToStorage(newKey, saved);
+          removeFromStorage(oldKey);
+        }
+      }
+      hasPersistedRef.current = true;
+      // Keep the current measurements as-is; the auto-sync effect now has a
+      // UUID and will create them server-side under it.
+      return;
+    }
+
+    hasPersistedRef.current = false;
+    setSyncedToServer(false);
+    geometrySigRef.current.clear();
+    setMeasurements([]);
 
     let cancelled = false;
 
     async function loadData() {
-      // Try server first if project is available
-      if (projectId) {
+      // Try the server first. A document's measurements can live under EITHER
+      // its UUID or its filename (filename-keyed rows were written before the
+      // background upload assigned a UUID, or when a duplicate-name upload
+      // 409'd and never got one). Querying both keys and merging means the
+      // measurements show up no matter which key they were saved under — the
+      // fix for "Measurements (0)" after a refresh / document switch
+      // (D-TKC-UP07).
+      if (projectId && serverDocId) {
         try {
-          const serverData = await takeoffApi.list(projectId, fileName ?? undefined);
+          const keys: string[] = [];
+          if (documentId) keys.push(documentId);
+          if (fileName && fileName !== documentId) keys.push(fileName);
+          if (keys.length === 0) keys.push(serverDocId);
+
+          const lists = await Promise.all(
+            keys.map((k) =>
+              takeoffApi.list(projectId, k).catch(() => [] as MeasurementResponse[]),
+            ),
+          );
+          // Merge, de-duplicating by server id first and then by the stable
+          // frontend id, so a measurement that exists under two keys (e.g. a
+          // mid-migration row) is only shown once. UUID rows win over filename
+          // rows because the UUID key is listed first.
+          const seenServer = new Set<string>();
+          const seenFrontend = new Set<string>();
+          const serverData: MeasurementResponse[] = [];
+          for (const list of lists) {
+            for (const row of list) {
+              const fid = (row.metadata?.frontend_id as string) || '';
+              if (seenServer.has(row.id)) continue;
+              if (fid && seenFrontend.has(fid)) continue;
+              seenServer.add(row.id);
+              if (fid) seenFrontend.add(fid);
+              serverData.push(row);
+            }
+          }
+
           if (!cancelled && serverData.length > 0) {
             hasPersistedRef.current = true;
             setSyncedToServer(true);
@@ -411,7 +568,7 @@ export function useMeasurementPersistence({
 
       // Fallback to localStorage
       if (!cancelled) {
-        const data = loadFromStorage(fileName!);
+        const data = localStorageKey ? loadFromStorage(localStorageKey) : null;
         if (data) {
           hasPersistedRef.current = true;
           setMeasurements(data.measurements);
@@ -422,24 +579,32 @@ export function useMeasurementPersistence({
           setPageScales(hydratePageScales(data.pageScales, data.scale));
         } else {
           hasPersistedRef.current = false;
+          setMeasurements([]);
         }
       }
     }
 
     loadData();
     return () => { cancelled = true; };
-  }, [fileName, projectId, setMeasurements, setPageScales]);
+    // NOTE: ``documentId`` is intentionally NOT a dependency. The persistence
+    // identity is filename-based, so a UUID arriving AFTER the filename (local
+    // drop -> background upload) must not re-run this effect: doing so cancelled
+    // the in-flight load and then bailed at the identity guard, leaving the list
+    // empty (the "Measurements (0)" with the PDF visible bug). The load still
+    // reads the latest documentId from its closure for the dual-key query.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fileName, projectId, serverDocId, localStorageKey, documentIdentity, setMeasurements, setPageScales]);
 
   // Auto-save to localStorage with debounce (500ms)
   useEffect(() => {
-    if (!fileName) return;
+    if (!localStorageKey) return;
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
       // Never persist AI suggestions: only confirmed measurements are saved.
       // Persist BOTH the new per-page model and the legacy single ``scale``
       // (the current page's, as a best-effort default) so a downgrade to an
       // older build that only reads ``scale`` still finds a usable value.
-      saveToStorage(fileName, {
+      saveToStorage(localStorageKey, {
         measurements: measurements.filter((m) => !m.suggested),
         pageScales,
         scale,
@@ -449,56 +614,74 @@ export function useMeasurementPersistence({
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
-  }, [fileName, measurements, pageScales, scale]);
+  }, [localStorageKey, measurements, pageScales, scale]);
 
-  // Auto-sync to server with debounce (3s). Both measurement and annotation
-  // types persist now (v2.6.7) — backend schema accepts the full set.
+  const syncMeasurementsToServer = useCallback(async (serverMeasurements: Measurement[] = measurements) => {
+    if (!fileName || !projectId || !serverDocId) return false;
+
+    const toCreate = serverMeasurements
+      .filter((m) => !m.serverId && !m.suggested)
+      .map((m) => toApiFormat(m, projectId, serverDocId, pageScales));
+
+    if (toCreate.length === 0) {
+      setSyncedToServer(true);
+      return true;
+    }
+
+    // Don't overlap with an in-flight sync — that would re-send the same
+    // serverId-less rows and create duplicates. The completing sync re-runs
+    // this effect to flush whatever is still pending.
+    if (inFlightSyncRef.current) return false;
+    inFlightSyncRef.current = true;
+    setSyncing(true);
+    try {
+      const created = await takeoffApi.bulkCreate(toCreate);
+      setMeasurements((prev) => prev.map((m) => {
+        if (m.serverId || m.suggested) return m;
+        const match = created.find((c) =>
+          (c.metadata?.frontend_id as string) === m.id
+        );
+        if (!match) return m;
+        geometrySigRef.current.set(match.id, geometrySignature(m));
+        return { ...m, serverId: match.id };
+      }));
+      qc?.invalidateQueries({ queryKey: ['unified-markups'] });
+      setSyncedToServer(true);
+      return true;
+    } catch {
+      setSyncedToServer(false);
+      return false;
+    } finally {
+      setSyncing(false);
+      inFlightSyncRef.current = false;
+    }
+  }, [fileName, projectId, serverDocId, measurements, pageScales, setMeasurements, qc]);
+
   useEffect(() => {
-    if (!fileName || !projectId) return;
+    if (measurements.some((m) => !m.serverId && !m.suggested)) {
+      setSyncedToServer(false);
+    }
+  }, [measurements]);
+
+  // Auto-sync to server with a short debounce (1s) so each drawn action is
+  // persisted almost immediately — the user expects "every action saves" and a
+  // 3s window left too much unsynced work on a quick refresh. The in-flight
+  // guard in syncMeasurementsToServer keeps the faster cadence from
+  // double-creating. Both measurement and annotation types persist (v2.6.7).
+  useEffect(() => {
+    if (!fileName || !projectId || !serverDocId) return;
     if (measurements.length === 0) return;
     const serverMeasurements = measurements;
 
     if (serverSyncRef.current) clearTimeout(serverSyncRef.current);
     serverSyncRef.current = setTimeout(async () => {
-      setSyncing(true);
-      try {
-        const toCreate = serverMeasurements
-          // Suggested-but-unconfirmed measurements are excluded; accepting a
-          // suggestion clears `suggested` and the next tick syncs it (#194).
-          .filter((m) => !m.serverId && !m.suggested)
-          // Per-page scale: toApiFormat resolves each row's own page scale
-          // from pageScales, so a multi-sheet set syncs correct ratios.
-          .map((m) => toApiFormat(m, projectId, fileName, pageScales));
-
-        if (toCreate.length > 0) {
-          const created = await takeoffApi.bulkCreate(toCreate);
-          // Update serverId on created measurements
-          setMeasurements(measurements.map((m) => {
-            if (m.serverId) return m;
-            const match = created.find((c) =>
-              (c.metadata?.frontend_id as string) === m.id
-            );
-            if (!match) return m;
-            // Seed the reshape baseline for the freshly-synced row so a
-            // later in-canvas edit PATCHes, but a no-op tick does not (#194).
-            geometrySigRef.current.set(match.id, geometrySignature(m));
-            return { ...m, serverId: match.id };
-          }));
-          // Surface the new measurements in the unified Markups hub.
-          qc?.invalidateQueries({ queryKey: ['unified-markups'] });
-        }
-        setSyncedToServer(true);
-      } catch {
-        // Server sync failed — data safe in localStorage
-      } finally {
-        setSyncing(false);
-      }
-    }, 3000);
+      void syncMeasurementsToServer(serverMeasurements);
+    }, 1000);
 
     return () => {
       if (serverSyncRef.current) clearTimeout(serverSyncRef.current);
     };
-  }, [fileName, projectId, measurements, setMeasurements, pageScales]);
+  }, [fileName, projectId, serverDocId, measurements, syncMeasurementsToServer]);
 
   // Reshape PATCH (#194 Feature 1). When a measurement that already has a
   // `serverId` has its geometry changed in-canvas, PATCH just that row so
@@ -586,14 +769,16 @@ export function useMeasurementPersistence({
 
   const saveNow = useCallback(() => {
     if (!fileName) return;
-    saveToStorage(fileName, { measurements, pageScales, scale, savedAt: Date.now() });
-  }, [fileName, measurements, pageScales, scale]);
+    if (!localStorageKey) return;
+    saveToStorage(localStorageKey, { measurements, pageScales, scale, savedAt: Date.now() });
+    void syncMeasurementsToServer(measurements);
+  }, [fileName, localStorageKey, measurements, pageScales, scale, syncMeasurementsToServer]);
 
   const clearPersisted = useCallback(() => {
-    if (!fileName) return;
-    removeFromStorage(fileName);
+    if (!localStorageKey) return;
+    removeFromStorage(localStorageKey);
     hasPersistedRef.current = false;
-  }, [fileName]);
+  }, [localStorageKey]);
 
   return {
     hasPersistedData: hasPersistedRef.current,

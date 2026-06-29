@@ -3901,34 +3901,61 @@ async def upload_document(
     )
 
     # Cross-link: create Document record so takeoff PDFs appear in
-    # Documents hub.  Uses the ORM Document model directly so the row
-    # picks up timestamps + defaults from the Base mixin and stays in
-    # sync with any future schema migration.  Best-effort: failure
-    # here MUST NOT break the upload - the takeoff doc is already
-    # persisted via service.upload_document().
+    # Documents hub.  Uses its OWN session so a constraint violation or
+    # any other cross-link failure CANNOT roll back the upload transaction.
     if project_id:
         try:
+            from app.database import async_session_factory
             from app.modules.documents.models import Document
 
-            xlink_doc = Document(
-                project_id=_uuid.UUID(project_id),
-                name=file.filename,
-                description="Takeoff document",
-                category="drawing",
-                file_size=len(content),
-                mime_type="application/pdf",
-                file_path=doc.file_path or "",
-                version=1,
-                uploaded_by=user_id or "",
-                tags=["takeoff", "pdf"],
-                metadata_={
+            async with async_session_factory() as xlink_session:
+                pid = verified_pid or _uuid.UUID(project_id)
+                existing = None
+                if doc.file_path:
+                    existing = (
+                        await xlink_session.execute(
+                            select(Document).where(
+                                Document.project_id == pid,
+                                Document.file_path == doc.file_path,
+                            )
+                        )
+                    ).scalar_one_or_none()
+
+                xlink_metadata = {
                     "source_module": "takeoff",
                     "source_id": str(doc.id),
-                },
-            )
-            service.session.add(xlink_doc)
-            await service.session.flush()
-            logger.info("Cross-linked takeoff doc %s -> document %s", doc.id, xlink_doc.id)
+                    "source_filename": doc.filename,
+                    "source_url": f"/api/v1/takeoff/documents/{doc.id}/download/",
+                }
+                if existing:
+                    xlink_doc = existing
+                    xlink_doc.name = file.filename
+                    xlink_doc.description = "Takeoff document"
+                    xlink_doc.category = "drawing"
+                    xlink_doc.file_size = len(content)
+                    xlink_doc.mime_type = "application/pdf"
+                    xlink_doc.file_path = doc.file_path or ""
+                    xlink_doc.uploaded_by = str(user_id)
+                    xlink_doc.tags = ["takeoff", "pdf"]
+                    xlink_doc.metadata_ = {**(xlink_doc.metadata_ or {}), **xlink_metadata}
+                else:
+                    xlink_doc = Document(
+                        project_id=pid,
+                        name=file.filename,
+                        description="Takeoff document",
+                        category="drawing",
+                        file_size=len(content),
+                        mime_type="application/pdf",
+                        file_path=doc.file_path or "",
+                        version=1,
+                        uploaded_by=str(user_id),
+                        tags=["takeoff", "pdf"],
+                        metadata_=xlink_metadata,
+                    )
+                    xlink_session.add(xlink_doc)
+                await xlink_session.commit()
+                xlink_doc_id = xlink_doc.id
+            logger.info("Cross-linked takeoff doc %s -> document %s", doc.id, xlink_doc_id)
         except Exception:
             logger.exception("Failed to cross-link takeoff document to Documents hub")
 
@@ -3999,6 +4026,63 @@ async def _verify_takeoff_doc_access(
         )
 
 
+async def _ensure_documents_hub_link(doc: Any, user_id: str) -> None:
+    """Best-effort mirror row so takeoff PDFs appear in Project Files."""
+    if not getattr(doc, "project_id", None):
+        return
+    try:
+        from app.database import async_session_factory
+        from app.modules.documents.models import Document
+
+        async with async_session_factory() as xlink_session:
+            existing = None
+            if getattr(doc, "file_path", None):
+                existing = (
+                    await xlink_session.execute(
+                        select(Document).where(
+                            Document.project_id == doc.project_id,
+                            Document.file_path == doc.file_path,
+                        )
+                    )
+                ).scalar_one_or_none()
+
+            xlink_metadata = {
+                "source_module": "takeoff",
+                "source_id": str(doc.id),
+                "source_filename": doc.filename,
+                "source_url": f"/api/v1/takeoff/documents/{doc.id}/download/",
+            }
+            if existing:
+                xlink_doc = existing
+                xlink_doc.name = doc.filename
+                xlink_doc.description = "Takeoff document"
+                xlink_doc.category = "drawing"
+                xlink_doc.file_size = int(getattr(doc, "size_bytes", 0) or 0)
+                xlink_doc.mime_type = getattr(doc, "content_type", None) or "application/pdf"
+                xlink_doc.file_path = getattr(doc, "file_path", None) or ""
+                xlink_doc.uploaded_by = str(user_id)
+                xlink_doc.tags = ["takeoff", "pdf"]
+                xlink_doc.metadata_ = {**(xlink_doc.metadata_ or {}), **xlink_metadata}
+            else:
+                xlink_doc = Document(
+                    project_id=doc.project_id,
+                    name=doc.filename,
+                    description="Takeoff document",
+                    category="drawing",
+                    file_size=int(getattr(doc, "size_bytes", 0) or 0),
+                    mime_type=getattr(doc, "content_type", None) or "application/pdf",
+                    file_path=getattr(doc, "file_path", None) or "",
+                    version=1,
+                    uploaded_by=str(user_id),
+                    tags=["takeoff", "pdf"],
+                    metadata_=xlink_metadata,
+                )
+                xlink_session.add(xlink_doc)
+            await xlink_session.commit()
+    except Exception:
+        logger.exception("Failed to ensure Documents hub link for takeoff document %s", getattr(doc, "id", None))
+
+
 # ── List documents ────────────────────────────────────────────────────────
 
 
@@ -4032,6 +4116,8 @@ async def list_documents(
     docs = await service.list_documents(user_id, project_id=project_id)
     rows: list[dict[str, Any]] = []
     for d in docs:
+        if project_id:
+            await _ensure_documents_hub_link(d, str(user_id))
         no_text_count, no_text_pages = no_text_layer_info(d)
         rows.append(
             {
@@ -4327,7 +4413,25 @@ async def analyze_document(
 
     # 6. Parse AI response
     parsed = extract_json(raw_response)
+    # Some providers (notably DeepSeek) wrap the array in an object like
+    # {"items": [...]} / {"elements": [...]} instead of returning a bare array.
+    # Unwrap the first list value so a well-formed-but-wrapped response isn't
+    # silently discarded as "0 elements" (D-TKC-UP16).
+    if isinstance(parsed, dict):
+        for _key in ("items", "elements", "boq", "positions", "rows", "results", "data"):
+            if isinstance(parsed.get(_key), list):
+                parsed = parsed[_key]
+                break
+        else:
+            _lists = [v for v in parsed.values() if isinstance(v, list)]
+            parsed = _lists[0] if _lists else []
     if not isinstance(parsed, list):
+        logger.warning(
+            "AI analysis for doc %s: response was not a JSON list (type=%s, %d chars) - 0 items",
+            doc_id,
+            type(parsed).__name__,
+            len(raw_response or ""),
+        )
         parsed = []
 
     # 7. Convert to the AnalysisResult format expected by frontend
@@ -4663,6 +4767,30 @@ async def delete_document(
 
     await _verify_takeoff_doc_access(doc, str(user_id) if user_id else "", session)
 
+    # Clean up the cross-linked entry in the Documents hub so the
+    # "Archivos de proyecto" module doesn't keep an orphan row.
+    if getattr(doc, "project_id", None) and getattr(doc, "file_path", None):
+        try:
+            from app.database import async_session_factory
+            from app.modules.documents.models import Document
+
+            async with async_session_factory() as xlink_session:
+                hub_doc = (
+                    await xlink_session.execute(
+                        select(Document).where(
+                            Document.project_id == doc.project_id,
+                            Document.file_path == doc.file_path,
+                        )
+                    )
+                ).scalar_one_or_none()
+                if hub_doc is not None:
+                    await xlink_session.delete(hub_doc)
+                    await xlink_session.commit()
+        except Exception:
+            logger.exception(
+                "Failed to clean up Documents-hub cross-link for takeoff doc %s", doc_id
+            )
+
     await service.delete_document(doc_id)
 
 
@@ -4860,17 +4988,36 @@ async def bulk_create_measurements(
     project, not per measurement) before any rows are written.
     """
     if not data.measurements:
+        logger.info("takeoff.measurements.bulk_create skipped: empty payload user=%s", user_id)
         return []
 
     # Collect the unique project IDs touched by this batch. A single
     # bulk import may cover one project (the common case) or several
     # (cross-project paste from another window) - both must be gated.
     project_ids = {m.project_id for m in data.measurements}
+    document_ids = sorted({str(m.document_id) for m in data.measurements if m.document_id})
+    type_counts: dict[str, int] = {}
+    for measurement in data.measurements:
+        type_counts[measurement.type] = type_counts.get(measurement.type, 0) + 1
+    logger.info(
+        "takeoff.measurements.bulk_create received: count=%d projects=%s documents=%s types=%s user=%s",
+        len(data.measurements),
+        sorted(str(pid) for pid in project_ids),
+        document_ids[:10],
+        type_counts,
+        user_id,
+    )
     for pid in project_ids:
         await verify_project_access(pid, str(user_id), session)
 
     try:
         items = await service.bulk_create_measurements(data.measurements, created_by=user_id)
+        logger.info(
+            "takeoff.measurements.bulk_create saved: count=%d ids=%s user=%s",
+            len(items),
+            [str(item.id) for item in items[:10]],
+            user_id,
+        )
         return [_measurement_to_response(i) for i in items]
     except HTTPException:
         raise
@@ -4905,8 +5052,24 @@ async def create_measurement(
     ``verify_project_access`` first.
     """
     await verify_project_access(data.project_id, str(user_id), session)
+    logger.info(
+        "takeoff.measurements.create received: project=%s document=%s page=%s type=%s frontend_id=%s user=%s",
+        data.project_id,
+        data.document_id,
+        data.page,
+        data.type,
+        (data.metadata or {}).get("frontend_id"),
+        user_id,
+    )
     try:
         item = await service.create_measurement(data, created_by=user_id)
+        logger.info(
+            "takeoff.measurements.create saved: id=%s project=%s document=%s user=%s",
+            item.id,
+            item.project_id,
+            item.document_id,
+            user_id,
+        )
         return _measurement_to_response(item)
     except HTTPException:
         raise

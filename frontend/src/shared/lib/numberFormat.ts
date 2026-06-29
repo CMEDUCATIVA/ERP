@@ -37,29 +37,37 @@ function cacheKey(kind: ValueFormatKind, locale: string, opts: FormatOptions): s
 
 const formatterCache = new Map<string, Intl.NumberFormat>();
 
+function clampFractionDigits(value: unknown, fallback = 2): number {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(20, Math.max(0, Math.trunc(n)));
+}
+
 function buildFormatter(
   kind: ValueFormatKind,
   locale: string,
   opts: FormatOptions,
 ): Intl.NumberFormat {
   const base: Intl.NumberFormatOptions = {};
+  const min = clampFractionDigits(opts.minimumFractionDigits, 0);
+  const max = Math.max(min, clampFractionDigits(opts.maximumFractionDigits, 2));
   switch (kind) {
     case 'currency':
       base.style = 'currency';
       base.currency =
         opts.currency && /^[A-Z]{3}$/.test(opts.currency) ? opts.currency : 'EUR';
-      base.minimumFractionDigits = opts.minimumFractionDigits ?? 0;
-      base.maximumFractionDigits = opts.maximumFractionDigits ?? 2;
+      base.minimumFractionDigits = min;
+      base.maximumFractionDigits = max;
       break;
     case 'percent':
       base.style = 'percent';
-      base.minimumFractionDigits = opts.minimumFractionDigits ?? 0;
-      base.maximumFractionDigits = opts.maximumFractionDigits ?? 2;
+      base.minimumFractionDigits = min;
+      base.maximumFractionDigits = max;
       break;
     case 'number':
     default:
-      base.minimumFractionDigits = opts.minimumFractionDigits ?? 0;
-      base.maximumFractionDigits = opts.maximumFractionDigits ?? 2;
+      base.minimumFractionDigits = min;
+      base.maximumFractionDigits = max;
       break;
   }
   return new Intl.NumberFormat(locale, base);

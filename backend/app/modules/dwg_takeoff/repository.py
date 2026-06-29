@@ -49,6 +49,25 @@ class DwgDrawingRepository:
 
         return items, total
 
+    async def count_by_filename_in_project(
+        self, project_id: uuid.UUID, filename: str
+    ) -> int:
+        """Count drawings with the same original filename in a project.
+
+        Used by the upload path to reject a duplicate upload (the same file
+        re-uploaded creates an identical, confusing row in the filmstrip).
+        """
+        stmt = (
+            select(func.count())
+            .select_from(DwgDrawing)
+            .where(
+                DwgDrawing.project_id == project_id,
+                DwgDrawing.filename == filename,
+            )
+        )
+        result = await self.session.execute(stmt)
+        return int(result.scalar_one() or 0)
+
     async def create(self, item: DwgDrawing) -> DwgDrawing:
         """Insert a new drawing."""
         self.session.add(item)

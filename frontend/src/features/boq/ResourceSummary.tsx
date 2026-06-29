@@ -17,21 +17,14 @@ import { boqApi, type ResourceSummaryItem, type ResourceSummaryResponse } from '
 import { apiPost } from '@/shared/lib/api';
 import { useToastStore } from '@/stores/useToastStore';
 import { getResourceTypeLabel } from './boqResourceTypes';
+import { getResourceTypeBadge, getResourceTypeDefinition } from '@/shared/lib/resourceTypes';
 import { VariantPicker } from '@/features/costs/VariantPicker';
 import type { CostVariant } from '@/features/costs/api';
 
 /* ── Constants ──────────────────────────────────────────────────────── */
 
-const RESOURCE_TYPE_FILTERS = ['all', 'material', 'labor', 'equipment', 'subcontractor', 'other'] as const;
+const RESOURCE_TYPE_FILTERS = ['all', 'material', 'labor', 'equipment', 'operator', 'subcontractor', 'overhead', 'other'] as const;
 type ResourceTypeFilter = (typeof RESOURCE_TYPE_FILTERS)[number];
-
-const TYPE_BADGE_STYLES: Record<string, string> = {
-  material: 'bg-blue-500/10 text-blue-600',
-  labor: 'bg-amber-500/10 text-amber-600',
-  equipment: 'bg-violet-500/10 text-violet-600',
-  subcontractor: 'bg-rose-500/10 text-rose-600',
-  other: 'bg-gray-500/10 text-gray-600',
-};
 
 const TYPE_ICONS: Record<string, React.ReactNode> = {
   material: <Package size={13} />,
@@ -76,6 +69,7 @@ export function ResourceSummary({ boqId, locale = 'de-DE' }: { boqId: string; lo
       const key = `${resource.type}:${resource.name}`;
       setSavingResource(key);
       try {
+        const typeDef = getResourceTypeDefinition(resource.type);
         const code = `MY-${resource.type.toUpperCase().slice(0, 3)}-${Date.now().toString(36).toUpperCase()}`;
 
         // Read project & BOQ info from React Query cache
@@ -99,6 +93,10 @@ export function ResourceSummary({ boqId, locale = 'de-DE' }: { boqId: string; lo
           specifications: {
             total_quantity: resource.total_quantity,
             total_cost: resource.total_cost,
+            resource_type_code: typeDef?.code,
+            resource_type_name: typeDef?.name,
+            resource_type_badge: typeDef?.badge,
+            calculation_group: typeDef?.calculationGroup ?? resource.type,
             positions_used: resource.positions_used,
             source_project_name: projectData?.name || '',
             source_project_id: boqData?.project_id || '',
@@ -106,7 +104,12 @@ export function ResourceSummary({ boqId, locale = 'de-DE' }: { boqId: string; lo
             source_boq_id: boqId || '',
             saved_at: new Date().toISOString(),
           },
-          metadata: {},
+          metadata: {
+            resource_type_code: typeDef?.code,
+            resource_type_name: typeDef?.name,
+            resource_type_badge: typeDef?.badge,
+            calculation_group: typeDef?.calculationGroup ?? resource.type,
+          },
         });
         setSavedResources((prev) => new Set(prev).add(key));
         addToast({
@@ -270,7 +273,7 @@ export function ResourceSummary({ boqId, locale = 'de-DE' }: { boqId: string; lo
               {Object.entries(summary.by_type).map(([type, info]) => (
                 <span
                   key={type}
-                  className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium ${TYPE_BADGE_STYLES[type] || TYPE_BADGE_STYLES.other}`}
+                  className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium ${getResourceTypeBadge(type).bg}`}
                 >
                   {info.count} {typeFilterLabel(type as ResourceTypeFilter).toLowerCase()}
                 </span>
@@ -292,7 +295,7 @@ export function ResourceSummary({ boqId, locale = 'de-DE' }: { boqId: string; lo
             {Object.entries(summary.by_type).map(([type, info]) => (
               <div
                 key={type}
-                className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 ${TYPE_BADGE_STYLES[type] || TYPE_BADGE_STYLES.other}`}
+                className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 ${getResourceTypeBadge(type).bg}`}
               >
                 {TYPE_ICONS[type] || TYPE_ICONS.other}
                 <span className="text-xs font-semibold tabular-nums">{info.count}</span>
@@ -567,7 +570,7 @@ function ResourceRow({
   abcDividerAbove?: boolean;
 }) {
   const { t } = useTranslation();
-  const badgeStyle = TYPE_BADGE_STYLES[resource.type] || TYPE_BADGE_STYLES.other;
+  const badgeStyle = getResourceTypeBadge(resource.type).bg;
 
   /* ── Variant re-pick (mirrors EditableResourceRow on the BOQ grid) ───
    *  Variants are intrinsic to one abstract resource — a swap here fans

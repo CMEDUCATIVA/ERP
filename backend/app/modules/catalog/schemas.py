@@ -115,6 +115,75 @@ class CatalogResourceUpdate(BaseModel):
         return _serialise_money(v)
 
 
+# ── Resource type registry ─────────────────────────────────────────────
+
+
+class CatalogResourceTypeBase(BaseModel):
+    """Shared fields for catalog resource type registry entries."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    value: str = Field(..., min_length=1, max_length=20)
+    code: str = Field(..., min_length=1, max_length=2, pattern=r"^\d{1,2}$")
+    name: str = Field(..., min_length=1, max_length=100)
+    calculation_group: str = Field(default="generic", min_length=1, max_length=30)
+    badge: str = Field(default="OT", min_length=1, max_length=8)
+    bg: str = Field(default="bg-gray-100 text-gray-600", min_length=1, max_length=160)
+    i18n_key: str | None = Field(default=None, max_length=100)
+    fallback: str | None = Field(default=None, max_length=100)
+    sort_order: int = Field(default=0, ge=0)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class CatalogResourceTypeCreate(CatalogResourceTypeBase):
+    """Create a user-defined resource type."""
+
+
+class CatalogResourceTypeUpdate(BaseModel):
+    """Update editable fields on a resource type."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    code: str | None = Field(default=None, min_length=1, max_length=2, pattern=r"^\d{1,2}$")
+    name: str | None = Field(default=None, min_length=1, max_length=100)
+    calculation_group: str | None = Field(default=None, min_length=1, max_length=30)
+    badge: str | None = Field(default=None, min_length=1, max_length=8)
+    bg: str | None = Field(default=None, min_length=1, max_length=160)
+    i18n_key: str | None = Field(default=None, max_length=100)
+    fallback: str | None = Field(default=None, max_length=100)
+    sort_order: int | None = Field(default=None, ge=0)
+    is_active: bool | None = None
+    metadata: dict[str, Any] | None = None
+
+
+class CatalogResourceTypeResponse(BaseModel):
+    """Resource type registry entry."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    value: str
+    code: str
+    name: str
+    calculation_group: str
+    badge: str
+    bg: str
+    i18n_key: str | None
+    fallback: str | None
+    is_system: bool
+    protected: bool = False
+    is_active: bool
+    sort_order: int
+    metadata: dict[str, Any] = Field(alias="metadata_")
+    created_at: datetime
+    updated_at: datetime
+
+    @model_validator(mode="after")
+    def _populate_protected(self) -> "CatalogResourceTypeResponse":
+        self.protected = self.is_system
+        return self
+
+
 class CatalogResourceResponse(BaseModel):
     """‌⁠‍Catalog resource in API responses.
 

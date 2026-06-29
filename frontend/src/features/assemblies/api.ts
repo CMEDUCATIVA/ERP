@@ -5,13 +5,7 @@ import { apiGet, apiPost, apiPatch, apiDelete } from '@/shared/lib/api';
  * v2940 so the M/L/E breakdown can be filtered and rolled up without
  * description-text inference.
  */
-export type ResourceType =
-  | 'material'
-  | 'labor'
-  | 'equipment'
-  | 'operator'
-  | 'subcontractor'
-  | 'overhead';
+export type ResourceType = string;
 
 /**
  * Optional, type-specific metadata fields the editor can attach to a

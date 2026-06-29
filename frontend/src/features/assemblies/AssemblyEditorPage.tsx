@@ -40,6 +40,16 @@ import {
 } from './api';
 import { fmtWithCurrency } from '../boq/boqHelpers';
 import { unitKeys, unitSymbol, unitLabel } from '@/shared/lib/unitDefinitions';
+import {
+  getCatalogResourceTypes,
+  getResourceTypeBadge,
+  getResourceTypeLabel,
+  readStoredResourceTypes,
+  resourceTypeFromApi,
+  writeStoredResourceTypes,
+  type ResourceTypeApiResource,
+  type ResourceTypeOption,
+} from '@/shared/lib/resourceTypes';
 
 /* -- Constants ------------------------------------------------------------ */
 
@@ -91,6 +101,34 @@ export function AssemblyEditorPage() {
       return status !== 404 && failureCount < 2;
     },
   });
+  const { data: resourceTypeRows } = useQuery({
+    queryKey: ['catalog', 'resource-types'],
+    queryFn: async () => {
+      const rows = await apiGet<ResourceTypeApiResource[]>('/v1/catalog/resource-types/');
+      if (rows.length) {
+        writeStoredResourceTypes(rows.map(resourceTypeFromApi));
+      }
+      return rows;
+    },
+    retry: false,
+    staleTime: 60_000,
+  });
+  const resourceTypeOptions = useMemo(
+    () => getCatalogResourceTypes(readStoredResourceTypes()),
+    [resourceTypeRows],
+  );
+  const resourceSectionDefs = useMemo(() => {
+    const byKey = new Map<string, { key: string; color: string }>();
+    for (const section of CAPECO_SECTION_DEFS) {
+      byKey.set(section.key, section);
+    }
+    for (const type of resourceTypeOptions) {
+      if (!byKey.has(type.value)) {
+        byKey.set(type.value, { key: type.value, color: type.value });
+      }
+    }
+    return Array.from(byKey.values());
+  }, [resourceTypeOptions]);
   const assemblyWasDeleted = (assemblyError as { status?: number } | null)?.status === 404;
   useEffect(() => {
     if (!assemblyWasDeleted || !assemblyId) return;
@@ -265,7 +303,7 @@ export function AssemblyEditorPage() {
     (resource_type: ResourceType = 'material') => {
       setAddMenuOpen(false);
       const defaults: Record<
-        ResourceType,
+        string,
         { description: string; unit: string; metadata?: CreateComponentData['metadata'] }
       > = {
         material: {
@@ -294,12 +332,17 @@ export function AssemblyEditorPage() {
           metadata: {},
         },
         overhead: {
-          description: t('assemblies.seed_overhead', { defaultValue: 'Overhead / markup' }),
+          description: t('assemblies.seed_overhead', { defaultValue: 'Gastos Generales' }),
           unit: assembly?.unit || 'lsum',
           metadata: {},
         },
       };
-      const d = defaults[resource_type];
+      const d = defaults[resource_type] ?? {
+        description: getResourceTypeLabel(resource_type, t),
+        unit: assembly?.unit || 'und',
+        metadata: { resource_type },
+      };
+      const typeSnapshot = resourceTypeOptions.find((type) => type.value === resource_type);
       addComponentMutation.mutate({
         description: d.description,
         resource_type,
@@ -307,10 +350,17 @@ export function AssemblyEditorPage() {
         quantity: 1,
         unit: d.unit,
         unit_cost: 0,
-        metadata: d.metadata,
+        metadata: {
+          ...(d.metadata ?? {}),
+          resource_type,
+          resource_type_code: typeSnapshot?.code,
+          resource_type_name: typeSnapshot?.name,
+          resource_type_badge: typeSnapshot?.badge,
+          calculation_group: typeSnapshot?.calculationGroup ?? typeSnapshot?.value,
+        },
       });
     },
-    [addComponentMutation, assembly?.unit, t],
+    [addComponentMutation, assembly?.unit, resourceTypeOptions, t],
   );
 
   const openCatalogPicker = useCallback((rt: ResourceType | null = null) => {
@@ -426,7 +476,7 @@ export function AssemblyEditorPage() {
     const rt = (component.resource_type ?? inferResourceType(component)) as ResourceType;
     return rt;
   };
-  const sectionGroups = CAPECO_SECTION_DEFS
+  const sectionGroups = resourceSectionDefs
     .map((section) => {
       const sectionComponents = components.filter(
         (component) => getComponentSection(component) === section.key,
@@ -508,7 +558,9 @@ export function AssemblyEditorPage() {
               ? t('assemblies.section_subcontractor', { defaultValue: 'SUBCONTRATISTA' })
               : key === 'tax'
                 ? t('assemblies.section_tax', { defaultValue: 'IMPUESTO' })
-                : t('assemblies.section_overhead', { defaultValue: 'GASTOS GENERALES' });
+                : key === 'overhead'
+                  ? t('assemblies.section_overhead', { defaultValue: 'GASTOS GENERALES' })
+                  : getResourceTypeLabel(key, t).toUpperCase();
 
   return (
     <div className="space-y-5 animate-fade-in">
@@ -653,29 +705,35 @@ export function AssemblyEditorPage() {
                   role="menu"
                   className="absolute right-0 mt-1.5 w-56 rounded-lg border border-border-light bg-surface-elevated shadow-lg z-40 py-1 animate-fade-in"
                 >
-                  {(
-                    [
-                      { rt: 'material', icon: LayersIcon, color: 'text-emerald-700' },
-                      { rt: 'labor', icon: HardHat, color: 'text-blue-700' },
-                      { rt: 'equipment', icon: Wrench, color: 'text-amber-700' },
-                      { rt: 'operator', icon: Hammer, color: 'text-orange-700' },
-                      { rt: 'subcontractor', icon: Briefcase, color: 'text-violet-700' },
-                      { rt: 'overhead', icon: Plus, color: 'text-slate-700' },
-                    ] as const
-                  ).map(({ rt, icon: Icon, color }) => (
+                  {resourceTypeOptions.map((type) => {
+                    const iconMap = {
+                      material: { icon: LayersIcon, color: 'text-emerald-700' },
+                      labor: { icon: HardHat, color: 'text-blue-700' },
+                      equipment: { icon: Wrench, color: 'text-amber-700' },
+                      operator: { icon: Hammer, color: 'text-orange-700' },
+                      subcontractor: { icon: Briefcase, color: 'text-violet-700' },
+                      overhead: { icon: Plus, color: 'text-slate-700' },
+                    } as const;
+                    const iconDef = iconMap[type.value as keyof typeof iconMap] ?? {
+                      icon: Boxes,
+                      color: 'text-content-secondary',
+                    };
+                    const Icon = iconDef.icon;
+                    return (
                     <button
-                      key={rt}
+                      key={type.value}
                       type="button"
                       role="menuitem"
-                      onClick={() => handleAddComponent(rt)}
+                      onClick={() => handleAddComponent(type.value)}
                       className="w-full px-3 py-1.5 text-left text-xs hover:bg-surface-secondary flex items-center gap-2"
                     >
-                      <Icon size={14} className={color} />
-                      {t(`assemblies.add_${rt}`, {
-                        defaultValue: `Add ${rt}`,
+                      <Icon size={14} className={iconDef.color} />
+                      {t(`assemblies.add_${type.value}`, {
+                        defaultValue: `Add ${type.name}`,
                       })}
                     </button>
-                  ))}
+                    );
+                  })}
                   {!hasTools && laborSubtotal > 0 && (
                     <>
                       <div className="my-1 h-px bg-border-light" />
@@ -834,7 +892,7 @@ export function AssemblyEditorPage() {
                       <span
                         className={clsx(
                           'text-[11px] font-bold uppercase tracking-wider',
-                          RESOURCE_TYPE_STYLES[section.color],
+                          RESOURCE_TYPE_STYLES[section.color] ?? getResourceTypeBadge(section.key).bg,
                           'bg-transparent dark:bg-transparent',
                         )}
                       >
@@ -865,6 +923,7 @@ export function AssemblyEditorPage() {
                 <ComponentRow
                   key={component.id}
                   component={component}
+                  resourceTypeOptions={resourceTypeOptions}
                   isDragOver={dragOverIdx === idx}
                   onDragStart={() => { dragIdx.current = idx; }}
                   onDragOver={(e) => { e.preventDefault(); setDragOverIdx(idx); }}
@@ -960,6 +1019,7 @@ export function AssemblyEditorPage() {
         laborSubtotal={laborSubtotal}
         toolsSubtotal={toolsSubtotal}
         crewSizeTotal={crewSizeTotal}
+        resourceTypeOptions={resourceTypeOptions}
       />
       </div>
 
@@ -968,6 +1028,7 @@ export function AssemblyEditorPage() {
         <CatalogResourcePickerModal
           assemblyId={assemblyId}
           initialType={catalogPickerType}
+          resourceTypeOptions={resourceTypeOptions}
           onAddComponent={addComponentMutation.mutateAsync}
           onClose={() => setCatalogPickerOpen(false)}
           onAdded={async () => {
@@ -1238,6 +1299,7 @@ const RESOURCE_TYPE_BAR: Record<string, string> = {
 
 function ComponentRow({
   component,
+  resourceTypeOptions,
   isDragOver,
   onDragStart,
   onDragOver,
@@ -1247,6 +1309,7 @@ function ComponentRow({
   onDelete,
 }: {
   component: AssemblyComponent;
+  resourceTypeOptions: ResourceTypeOption[];
   isDragOver: boolean;
   onDragStart: () => void;
   onDragOver: (e: React.DragEvent) => void;
@@ -1405,23 +1468,45 @@ function ComponentRow({
         ) : (
           (() => {
           const resType = (component.resource_type ?? inferResourceType(component)) as ResourceType;
+          const rowTypeOptions = resourceTypeOptions.some((type) => type.value === resType)
+            ? resourceTypeOptions
+            : [
+                ...resourceTypeOptions,
+                {
+                  value: resType,
+                  code: '99',
+                  name: getResourceTypeLabel(resType, t),
+                  badge: getResourceTypeBadge(resType).label,
+                  bg: getResourceTypeBadge(resType).bg,
+                },
+              ];
           return (
             <select
               value={resType}
-              onChange={(e) =>
-                onUpdate({ resource_type: e.target.value as ResourceType })
-              }
-              className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold cursor-pointer border-none outline-none focus:ring-1 focus:ring-oe-blue/40 ${RESOURCE_TYPE_STYLES[resType] ?? RESOURCE_TYPE_STYLES.material}`}
+              onChange={(e) => {
+                const nextType = e.target.value as ResourceType;
+                const typeSnapshot = rowTypeOptions.find((type) => type.value === nextType);
+                onUpdate({
+                  resource_type: nextType,
+                  metadata: {
+                    resource_type: nextType,
+                    resource_type_code: typeSnapshot?.code,
+                    resource_type_name: typeSnapshot?.name,
+                    resource_type_badge: typeSnapshot?.badge,
+                    calculation_group: typeSnapshot?.calculationGroup ?? typeSnapshot?.value,
+                  },
+                });
+              }}
+              className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold cursor-pointer border-none outline-none focus:ring-1 focus:ring-oe-blue/40 ${getResourceTypeBadge(resType).bg}`}
               title={t('assemblies.type_change_hint', {
                 defaultValue: 'Change resource type - recomputes the line total',
               })}
             >
-              <option value="material">{t('assemblies.type_material', { defaultValue: 'Mat' })}</option>
-              <option value="labor">{t('assemblies.type_labor', { defaultValue: 'Labor' })}</option>
-              <option value="equipment">{t('assemblies.type_equipment', { defaultValue: 'Equip' })}</option>
-              <option value="operator">{t('assemblies.type_operator', { defaultValue: 'Oper' })}</option>
-              <option value="subcontractor">{t('assemblies.type_subcontractor', { defaultValue: 'Sub' })}</option>
-              <option value="overhead">{t('assemblies.type_overhead', { defaultValue: 'OH' })}</option>
+              {rowTypeOptions.map((type) => (
+                <option key={type.value} value={type.value}>
+                  {type.name}
+                </option>
+              ))}
             </select>
           );
         })()
@@ -2214,6 +2299,7 @@ function BreakdownSidebar({
   laborSubtotal,
   toolsSubtotal,
   crewSizeTotal,
+  resourceTypeOptions,
 }: {
   breakdown: {
     totals: Record<string, number>;
@@ -2231,6 +2317,7 @@ function BreakdownSidebar({
   laborSubtotal: number;
   toolsSubtotal: number;
   crewSizeTotal: number;
+  resourceTypeOptions: ResourceTypeOption[];
 }) {
   const { t } = useTranslation();
   const fmt = (n: number) =>
@@ -2240,13 +2327,10 @@ function BreakdownSidebar({
     }).format(n);
   const money = (n: number) => fmtWithCurrency(n, getIntlLocale(), currency);
   const order: ResourceType[] = [
-    'material',
-    'labor',
-    'equipment',
-    'operator',
-    'subcontractor',
-    'overhead',
-  ];
+    ...resourceTypeOptions.map((type) => type.value),
+    ...Object.keys(breakdown.totals),
+    ...Object.keys(breakdown.counts),
+  ].filter((value, index, arr) => value && arr.indexOf(value) === index);
   const labelFor = (rt: string) =>
     rt === 'material'
       ? t('assemblies.type_material_full', { defaultValue: 'Materiales' })
@@ -2258,7 +2342,9 @@ function BreakdownSidebar({
             ? t('assemblies.type_operator_full', { defaultValue: 'Operator' })
             : rt === 'subcontractor'
               ? t('assemblies.type_subcontractor_full', { defaultValue: 'Subcontract' })
-              : t('assemblies.type_overhead_full', { defaultValue: 'Overhead' });
+              : rt === 'overhead'
+                ? t('assemblies.type_overhead_full', { defaultValue: 'Gastos Generales' })
+                : getResourceTypeLabel(rt, t);
   // Show every category that has components, not only the priced ones, so a
   // line you just added is visible (at 0) while you type its price in, and a
   // category with several components never silently drops out.
@@ -2322,7 +2408,7 @@ function BreakdownSidebar({
                   </div>
                   <div className="h-1.5 rounded-full bg-surface-tertiary overflow-hidden">
                     <div
-                      className={`h-full rounded-full transition-all ${RESOURCE_TYPE_BAR[rt]}`}
+                      className={`h-full rounded-full transition-all ${RESOURCE_TYPE_BAR[rt] ?? 'bg-gray-500'}`}
                       style={{ width: `${pct}%` }}
                     />
                   </div>
@@ -2400,7 +2486,7 @@ function BreakdownSidebar({
                     <span className="text-content-tertiary tabular-nums">{pct.toFixed(0)}%</span>
                   </div>
                   <div className="h-1.5 rounded-full bg-surface-tertiary overflow-hidden">
-                    <div className={`h-full rounded-full transition-all ${RESOURCE_TYPE_BAR[rt]}`} style={{ width: `${pct}%` }} />
+                    <div className={`h-full rounded-full transition-all ${RESOURCE_TYPE_BAR[rt] ?? 'bg-gray-500'}`} style={{ width: `${pct}%` }} />
                   </div>
                   <div className="text-[11px] text-content-tertiary tabular-nums mt-0.5">{money(value)}</div>
                 </div>
@@ -2468,12 +2554,14 @@ interface CatalogResourceItem {
 function CatalogResourcePickerModal({
   assemblyId,
   initialType,
+  resourceTypeOptions,
   onClose,
   onAdded,
   onAddComponent,
 }: {
   assemblyId: string;
   initialType: ResourceType | null;
+  resourceTypeOptions: ResourceTypeOption[];
   onClose: () => void;
   onAdded: () => void | Promise<void>;
   onAddComponent?: (data: CreateComponentData) => Promise<unknown>;
@@ -2605,10 +2693,11 @@ function CatalogResourcePickerModal({
             <option value="">
               {t('assemblies.catalog_type_any', { defaultValue: 'All types' })}
             </option>
-            <option value="material">{t('assemblies.type_material_full', { defaultValue: 'Material' })}</option>
-            <option value="labor">{t('assemblies.type_labor_full', { defaultValue: 'Labor' })}</option>
-            <option value="equipment">{t('assemblies.type_equipment_full', { defaultValue: 'Equipment' })}</option>
-            <option value="operator">{t('assemblies.type_operator_full', { defaultValue: 'Operator' })}</option>
+            {resourceTypeOptions.map((resourceType) => (
+              <option key={resourceType.value} value={resourceType.value}>
+                {resourceType.name}
+              </option>
+            ))}
           </select>
         </div>
 
@@ -2660,10 +2749,10 @@ function CatalogResourcePickerModal({
                     <td className="py-2 text-center">
                       <span
                         className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold ${
-                          RESOURCE_TYPE_STYLES[it.resource_type] ?? RESOURCE_TYPE_STYLES.material
+                          getResourceTypeBadge(it.resource_type).bg
                         }`}
                       >
-                        {it.resource_type}
+                        {getResourceTypeLabel(it.resource_type, t)}
                       </span>
                     </td>
                     <td className="py-2 text-center text-content-secondary">{it.unit}</td>

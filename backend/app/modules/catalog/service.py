@@ -13,7 +13,7 @@ from collections import defaultdict
 from decimal import Decimal, InvalidOperation
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.events import event_bus
@@ -28,11 +28,13 @@ async def _safe_publish(name: str, data: dict, source_module: str = "") -> None:
         _logger_ev.debug("Event publish skipped: %s", name)
 
 
-from app.modules.catalog.models import CatalogResource
+from app.modules.catalog.models import CatalogResource, CatalogResourceType
 from app.modules.catalog.repository import CatalogResourceRepository
 from app.modules.catalog.schemas import (
     CatalogCategoryStat,
     CatalogResourceCreate,
+    CatalogResourceTypeCreate,
+    CatalogResourceTypeUpdate,
     CatalogResourceUpdate,
     CatalogSearchQuery,
     CatalogStatsResponse,
@@ -41,6 +43,75 @@ from app.modules.catalog.schemas import (
 from app.modules.costs.models import CostItem
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_RESOURCE_TYPES: tuple[dict[str, object], ...] = (
+    {
+        "value": "labor",
+        "code": "01",
+        "name": "Mano de Obra",
+        "calculation_group": "labor",
+        "badge": "MO",
+        "bg": "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
+        "i18n_key": "boq.resource_type_labor",
+        "fallback": "Labor",
+        "sort_order": 10,
+    },
+    {
+        "value": "material",
+        "code": "02",
+        "name": "Materiales",
+        "calculation_group": "material",
+        "badge": "M",
+        "bg": "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300",
+        "i18n_key": "boq.resource_type_material",
+        "fallback": "Material",
+        "sort_order": 20,
+    },
+    {
+        "value": "equipment",
+        "code": "03",
+        "name": "Equipos",
+        "calculation_group": "equipment",
+        "badge": "E",
+        "bg": "bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300",
+        "i18n_key": "boq.resource_type_equipment",
+        "fallback": "Equipment",
+        "sort_order": 30,
+    },
+    {
+        "value": "operator",
+        "code": "04",
+        "name": "Operador",
+        "calculation_group": "operator",
+        "badge": "O",
+        "bg": "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300",
+        "i18n_key": "boq.resource_type_operator",
+        "fallback": "Operator",
+        "sort_order": 40,
+    },
+    {
+        "value": "subcontractor",
+        "code": "05",
+        "name": "Subcontratos",
+        "calculation_group": "subcontractor",
+        "badge": "S",
+        "bg": "bg-pink-100 text-pink-700 dark:bg-pink-900/40 dark:text-pink-300",
+        "i18n_key": "boq.resource_type_subcontractor",
+        "fallback": "Subcontractor",
+        "sort_order": 50,
+    },
+    {
+        "value": "overhead",
+        "code": "06",
+        "name": "Gastos Generales",
+        "calculation_group": "overhead",
+        "badge": "GG",
+        "bg": "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300",
+        "i18n_key": "boq.resource_type_overhead",
+        "fallback": "Gastos Generales",
+        "sort_order": 60,
+    },
+)
 
 # ── Categorization maps ──────────────────────────────────────────────────
 
@@ -117,6 +188,193 @@ class CatalogResourceService:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
         self.repo = CatalogResourceRepository(session)
+
+    async def ensure_default_resource_types(self) -> None:
+        """Create protected default resource types if they are missing."""
+        existing = {
+            value
+            for value in (
+                await self.session.execute(select(CatalogResourceType.value))
+            ).scalars().all()
+        }
+        missing: list[CatalogResourceType] = []
+        for row in DEFAULT_RESOURCE_TYPES:
+            if str(row["value"]) in existing:
+                continue
+            missing.append(
+                CatalogResourceType(
+                    value=str(row["value"]),
+                    code=str(row["code"]),
+                    name=str(row["name"]),
+                    calculation_group=str(row["calculation_group"]),
+                    badge=str(row["badge"]),
+                    bg=str(row["bg"]),
+                    i18n_key=str(row["i18n_key"]),
+                    fallback=str(row["fallback"]),
+                    is_system=True,
+                    is_active=True,
+                    sort_order=int(row["sort_order"]),
+                    metadata_={},
+                )
+            )
+        if missing:
+            self.session.add_all(missing)
+            await self.session.flush()
+
+    async def list_resource_types(self, include_inactive: bool = False) -> list[CatalogResourceType]:
+        await self.ensure_default_resource_types()
+        stmt = select(CatalogResourceType)
+        if not include_inactive:
+            stmt = stmt.where(CatalogResourceType.is_active.is_(True))
+        stmt = stmt.order_by(CatalogResourceType.sort_order, CatalogResourceType.code)
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def create_resource_type(self, data: CatalogResourceTypeCreate) -> CatalogResourceType:
+        await self.ensure_default_resource_types()
+        used_codes = set(
+            (
+                await self.session.execute(select(CatalogResourceType.code))
+            ).scalars().all()
+        )
+        requested_code = data.code.zfill(2)
+        existing_value = (
+            await self.session.execute(
+                select(CatalogResourceType).where(CatalogResourceType.value == data.value)
+            )
+        ).scalar_one_or_none()
+
+        def next_available_code(exclude: str | None = None) -> str | None:
+            unavailable = used_codes - ({exclude} if exclude else set())
+            for index in range(1, 100):
+                candidate = str(index).zfill(2)
+                if candidate not in unavailable:
+                    return candidate
+            return None
+
+        if existing_value is not None and existing_value.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Resource type value already exists",
+            )
+        if existing_value is not None:
+            code = (
+                requested_code
+                if requested_code == existing_value.code or requested_code not in used_codes
+                else next_available_code(exclude=existing_value.code)
+            )
+            if code is None:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="No available resource type codes",
+                )
+            await self.session.execute(
+                update(CatalogResourceType)
+                .where(CatalogResourceType.value == data.value)
+                .values(
+                    code=code,
+                    name=data.name,
+                    calculation_group=data.calculation_group,
+                    badge=data.badge.upper(),
+                    bg=data.bg,
+                    i18n_key=data.i18n_key,
+                    fallback=data.fallback or data.name,
+                    is_system=False,
+                    is_active=True,
+                    sort_order=int(code),
+                    metadata_=data.metadata,
+                )
+            )
+            await self.session.flush()
+            self.session.expire_all()
+            return (
+                await self.session.execute(
+                    select(CatalogResourceType).where(CatalogResourceType.value == data.value)
+                )
+            ).scalar_one()
+
+        code = requested_code if requested_code not in used_codes else next_available_code()
+        if code is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="No available resource type codes",
+            )
+        row = CatalogResourceType(
+            value=data.value,
+            code=code,
+            name=data.name,
+            calculation_group=data.calculation_group,
+            badge=data.badge.upper(),
+            bg=data.bg,
+            i18n_key=data.i18n_key,
+            fallback=data.fallback or data.name,
+            is_system=False,
+            is_active=True,
+            sort_order=int(code),
+            metadata_=data.metadata,
+        )
+        self.session.add(row)
+        await self.session.flush()
+        return row
+
+    async def update_resource_type(self, value: str, data: CatalogResourceTypeUpdate) -> CatalogResourceType:
+        await self.ensure_default_resource_types()
+        row = (
+            await self.session.execute(
+                select(CatalogResourceType).where(CatalogResourceType.value == value)
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resource type not found")
+        if row.is_system:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="System resource types cannot be edited")
+
+        fields = data.model_dump(exclude_unset=True, exclude_none=True)
+        if "code" in fields:
+            fields["code"] = str(fields["code"]).zfill(2)
+            duplicate = (
+                await self.session.execute(
+                    select(CatalogResourceType).where(
+                        CatalogResourceType.code == fields["code"],
+                        CatalogResourceType.value != value,
+                    )
+                )
+            ).scalar_one_or_none()
+            if duplicate is not None:
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Resource type code already exists")
+        if "badge" in fields:
+            fields["badge"] = str(fields["badge"]).upper()
+        if "metadata" in fields:
+            fields["metadata_"] = fields.pop("metadata")
+
+        if fields:
+            await self.session.execute(
+                update(CatalogResourceType).where(CatalogResourceType.value == value).values(**fields)
+            )
+            await self.session.flush()
+            self.session.expire_all()
+            row = (
+                await self.session.execute(
+                    select(CatalogResourceType).where(CatalogResourceType.value == value)
+                )
+            ).scalar_one()
+        return row
+
+    async def delete_resource_type(self, value: str) -> None:
+        await self.ensure_default_resource_types()
+        row = (
+            await self.session.execute(
+                select(CatalogResourceType).where(CatalogResourceType.value == value)
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resource type not found")
+        if row.is_system:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="System resource types cannot be deleted")
+        await self.session.execute(
+            update(CatalogResourceType).where(CatalogResourceType.value == value).values(is_active=False)
+        )
+        await self.session.flush()
 
     # ── Create ────────────────────────────────────────────────────────────
 

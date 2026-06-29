@@ -14,6 +14,7 @@ import {
 export interface CategoryCount {
   category: string;
   count: number;
+  code?: string;
 }
 
 export interface CategoryComboboxProps {
@@ -241,6 +242,8 @@ export function CategoryCombobox({
   /* ── helpers ────────────────────────────────────────────────────────── */
   const countFor = (name: string) =>
     categories.find((c) => c.category === name)?.count;
+  const codeFor = (name: string) =>
+    categories.find((c) => c.category === name)?.code;
 
   return (
     <div
@@ -408,6 +411,11 @@ export function CategoryCombobox({
                   }`}
                 >
                   <span className="text-content-primary truncate flex-1">
+                    {codeFor(cat) && (
+                      <span className="mr-2 inline-block w-8 shrink-0 font-mono text-xs font-semibold text-content-secondary">
+                        {codeFor(cat)}
+                      </span>
+                    )}
                     {cat}
                   </span>
                   {count != null && (

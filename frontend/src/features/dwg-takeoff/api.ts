@@ -255,8 +255,18 @@ export async function uploadDrawing(
     body: form,
   });
   if (!res.ok) {
-    const err = await res.text();
-    throw new Error(err || res.statusText);
+    const body = await res.text();
+    // FastAPI returns errors as ``{"detail": "..."}``. Surface the clean
+    // detail string instead of the raw JSON blob so callers (and the
+    // duplicate-warning UI) show a human message, not ``{"detail":"…"}``.
+    let message = body || res.statusText;
+    try {
+      const parsed = JSON.parse(body) as { detail?: unknown };
+      if (typeof parsed?.detail === 'string') message = parsed.detail;
+    } catch {
+      // Body wasn't JSON — keep the raw text.
+    }
+    throw new Error(message);
   }
   return res.json();
 }

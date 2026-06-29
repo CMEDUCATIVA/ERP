@@ -67,24 +67,34 @@ export function LayerPanel({ layers, visibleLayers, onToggleLayer, onShowAll, on
         {filtered.map((layer) => {
           const visible = visibleLayers.has(layer.name);
           return (
-            <button
+            <div
               key={layer.name}
-              onClick={() => onToggleLayer(layer.name)}
               className={clsx(
-                'flex items-center gap-2 rounded px-2 py-1 text-xs transition-colors',
-                visible
-                  ? 'text-foreground hover:bg-surface-secondary'
-                  : 'text-muted-foreground hover:bg-surface-secondary',
+                'flex items-center gap-2 rounded px-2 py-1 text-xs',
+                visible ? 'text-foreground' : 'text-muted-foreground',
               )}
             >
-              {visible ? <Eye size={13} /> : <EyeOff size={13} />}
+              {/* Only the eye toggles visibility — clicking the name / colour /
+                  count no longer hides the layer (mirrors the PDF legend fix,
+                  D-TKC-UP10: avoids accidental hides from a row-wide toggle). */}
+              <button
+                type="button"
+                onClick={() => onToggleLayer(layer.name)}
+                title={t('dwg_takeoff.toggle_layer_visibility', 'Show/hide layer')}
+                aria-label={t('dwg_takeoff.toggle_layer_visibility', 'Show/hide layer')}
+                aria-pressed={visible}
+                data-testid="dwg-layer-eye-toggle"
+                className="-m-1 flex shrink-0 items-center justify-center rounded p-1 text-muted-foreground transition-colors hover:bg-surface-secondary hover:text-foreground"
+              >
+                {visible ? <Eye size={13} /> : <EyeOff size={13} />}
+              </button>
               <span
                 className="h-2.5 w-2.5 rounded-full flex-shrink-0"
                 style={{ backgroundColor: resolveColor(layer.color) }}
               />
               <span className="truncate flex-1 text-left">{layer.name}</span>
               <span className="text-muted-foreground tabular-nums">{layer.entity_count}</span>
-            </button>
+            </div>
           );
         })}
         {filtered.length === 0 && (

@@ -4,7 +4,7 @@ Tables:
     oe_catalog_resource - curated resources (materials, equipment, labor, operators)
 """
 
-from sqlalchemy import JSON, Boolean, Integer, String
+from sqlalchemy import JSON, Boolean, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -50,3 +50,35 @@ class CatalogResource(Base):
             f"<CatalogResource {self.resource_code} "
             f"({self.resource_type}/{self.category} @ {self.base_price} {self.currency})>"
         )
+
+
+class CatalogResourceType(Base):
+    """Resource type registry used by catalog, assemblies and BOQ snapshots."""
+
+    __tablename__ = "oe_catalog_resource_type"
+    __table_args__ = (
+        UniqueConstraint("value", name="uq_catalog_resource_type_value"),
+        UniqueConstraint("code", name="uq_catalog_resource_type_code"),
+    )
+
+    value: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    code: Mapped[str] = mapped_column(String(2), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    calculation_group: Mapped[str] = mapped_column(String(30), nullable=False, default="generic")
+    badge: Mapped[str] = mapped_column(String(8), nullable=False, default="OT")
+    bg: Mapped[str] = mapped_column(String(160), nullable=False, default="bg-gray-100 text-gray-600")
+    i18n_key: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    fallback: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    is_system: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    metadata_: Mapped[dict] = mapped_column(
+        "metadata",
+        JSON,
+        nullable=False,
+        default=dict,
+        server_default="{}",
+    )
+
+    def __repr__(self) -> str:
+        return f"<CatalogResourceType {self.code} {self.value} ({self.name})>"

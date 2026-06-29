@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useMemo, useEffect, useId, lazy, Suspense } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSearchParams, useNavigate, Link } from 'react-router-dom';
-import { useQuery, useMutation } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
 import {
   FileSearch,
@@ -925,19 +925,12 @@ function TakeoffDocFilmstrip({
                       )}
                       <span
                         className={clsx(
-                          'text-[11px] font-semibold truncate',
+                          'text-[11px] font-semibold truncate pr-10',
                           isActive ? 'text-oe-blue' : 'text-content-primary',
                         )}
                       >
                         {doc.filename}
                       </span>
-                      {isPinned && (
-                        <Pin
-                          size={10}
-                          className="shrink-0 text-oe-blue"
-                          aria-label={t('takeoff.pinned', { defaultValue: 'Pinned' })}
-                        />
-                      )}
                     </div>
                     <div className="flex items-center gap-1.5 text-[10px] text-content-quaternary">
                       {doc.pages > 0 && (
@@ -957,6 +950,14 @@ function TakeoffDocFilmstrip({
                       )}
                     </div>
                   </div>
+                  {/* Upload error message — visible so the user knows what failed. */}
+                  {hasError && (
+                    <div className="px-2.5 pb-1.5">
+                      <p className="text-[9px] text-semantic-error leading-tight line-clamp-2" title={doc.uploadError}>
+                        {doc.uploadError}
+                      </p>
+                    </div>
+                  )}
                   {/* Pin + delete buttons on hover */}
                   <span
                     role="button"
@@ -976,7 +977,7 @@ function TakeoffDocFilmstrip({
                       'absolute top-1 right-6 p-1 rounded transition-all',
                       isPinned
                         ? 'text-oe-blue opacity-100'
-                        : 'text-content-quaternary hover:text-oe-blue-text hover:bg-oe-blue-subtle opacity-0 group-hover:opacity-100',
+                        : 'text-content-quaternary hover:text-oe-blue-text hover:bg-oe-blue-subtle opacity-40 group-hover:opacity-100',
                     )}
                     title={
                       isPinned
@@ -1004,7 +1005,7 @@ function TakeoffDocFilmstrip({
                         onDeleteDoc(doc.id);
                       }
                     }}
-                    className="absolute top-1 right-1 p-1 rounded text-content-quaternary hover:text-semantic-error hover:bg-semantic-error-bg opacity-0 group-hover:opacity-100 transition-all"
+                    className="absolute top-1 right-1 p-1 rounded text-content-quaternary hover:text-semantic-error hover:bg-semantic-error-bg opacity-40 group-hover:opacity-100 transition-all"
                     title={t('common.delete', 'Delete')}
                     aria-label={t('common.delete', 'Delete')}
                   >
@@ -1143,6 +1144,7 @@ function AiTakeoffNotice({ connected }: { connected: boolean }) {
 
 export function TakeoffPage() {
   const { t } = useTranslation();
+  const queryClient = useQueryClient();
 
   /* ── Tab state (synced with ?tab= query parameter from sidebar) ──── */
 
@@ -1169,10 +1171,11 @@ export function TakeoffPage() {
   const [activeDocId, setActiveDocId] = useState<string | null>(null);
   const [addToBOQSuccess, setAddToBOQSuccess] = useState<string | null>(null);
   const [uploadErrorToast, setUploadErrorToast] = useState<string | null>(null);
+  const [duplicateWarning, setDuplicateWarning] = useState<string | null>(null);
   const filmstripUploadRef = useRef<HTMLInputElement>(null);
 
   /** Currently opened document in the Measurements viewer. */
-  const [viewerDoc, setViewerDoc] = useState<{ url: string; name: string } | null>(null);
+  const [viewerDoc, setViewerDoc] = useState<{ url: string; name: string; id: string } | null>(null);
 
   /** Revision compare drawer (Item 17) — diffs two takeoff PDFs. */
   const [showCompare, setShowCompare] = useState(false);
@@ -1282,6 +1285,7 @@ export function TakeoffPage() {
     setViewerDoc({
       url: `/api/v1/takeoff/documents/${match.id}/download/`,
       name: match.filename,
+      id: match.id,
     });
     setActiveTab('measurements');
     const next = new URLSearchParams(searchParams);
@@ -1303,6 +1307,7 @@ export function TakeoffPage() {
     setViewerDoc({
       url: `/api/v1/takeoff/documents/${docId}/download/`,
       name: match.filename,
+      id: docId,
     });
     setActiveTab('measurements');
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1323,19 +1328,31 @@ export function TakeoffPage() {
     let cancelled = false;
     (async () => {
       try {
-        const meta = await apiGet<{ id: string; name: string; filename?: string }>(
+        const meta = await apiGet<{
+          id: string;
+          name: string;
+          filename?: string;
+          metadata?: Record<string, unknown>;
+        }>(
           `/v1/documents/${encodeURIComponent(docId)}`,
         );
         if (cancelled) return;
+        const sourceId =
+          meta.metadata?.source_module === 'takeoff' && typeof meta.metadata.source_id === 'string'
+            ? meta.metadata.source_id
+            : null;
         const displayName =
           meta.filename ||
           meta.name ||
           searchParams.get('name') ||
           t('takeoff.document_placeholder', { defaultValue: 'Document' });
-        setActiveDocId(docId);
+        setActiveDocId(sourceId ?? docId);
         setViewerDoc({
-          url: `/api/v1/documents/${encodeURIComponent(docId)}/download/`,
+          url: sourceId
+            ? `/api/v1/takeoff/documents/${encodeURIComponent(sourceId)}/download/`
+            : `/api/v1/documents/${encodeURIComponent(docId)}/download/`,
           name: displayName,
+          id: sourceId ?? docId,
         });
         setActiveTab('measurements');
       } catch {
@@ -1402,6 +1419,7 @@ export function TakeoffPage() {
       setViewerDoc({
         url: `/api/v1/takeoff/documents/${match.id}/download/`,
         name: match.filename,
+        id: match.id,
       });
       setActiveTab('measurements');
     } else if (serverDocuments.length >= 0) {
@@ -1424,7 +1442,14 @@ export function TakeoffPage() {
         headers['Authorization'] = `Bearer ${token}`;
       }
 
-      const response = await fetch(`/api/v1/takeoff/documents/upload/`, {
+      // Include the active project so the document is scoped to the project
+      // and appears in the filmstrip after page refresh (D-TKC-UP02).
+      const projectId = useProjectContextStore.getState().activeProjectId;
+      const url = projectId
+        ? `/api/v1/takeoff/documents/upload/?project_id=${encodeURIComponent(projectId)}`
+        : `/api/v1/takeoff/documents/upload/`;
+
+      const response = await fetch(url, {
         method: 'POST',
         headers,
         body: formData,
@@ -1469,7 +1494,7 @@ export function TakeoffPage() {
       );
     },
     onSuccess: (data, docId) => {
-      const elements = data.elements.map((el) => ({ ...el, selected: true }));
+      const elements = (data.elements ?? []).map((el) => ({ ...el, selected: true }));
       setDocuments((prev) =>
         prev.map((d) =>
           d.id === docId
@@ -1481,11 +1506,24 @@ export function TakeoffPage() {
             : d,
         ),
       );
+      // Don't leave the user staring at "nothing happened" when the AI ran but
+      // returned no usable items (D-TKC-UP16).
+      if (elements.length === 0) {
+        useToastStore.getState().addToast({
+          type: 'info',
+          title: t('takeoff.ai_analysis_results', 'AI Analysis Results'),
+          message: t('takeoff.analyze_no_items', 'The AI found no BOQ items in this document’s text.'),
+        });
+      }
     },
-    onError: (_err, docId) => {
+    onError: (err, docId) => {
       setDocuments((prev) =>
         prev.map((d) => (d.id === docId ? { ...d, analyzing: false } : d)),
       );
+      // Surface WHY it failed (no AI provider / no extracted text / LLM error)
+      // instead of silently doing nothing — "Analyze does nothing" (D-TKC-UP15).
+      const msg = err instanceof Error ? err.message : t('takeoff.analyze_failed', 'AI analysis failed');
+      useToastStore.getState().addToast({ type: 'error', title: t('takeoff.error_title', 'Error'), message: msg });
     },
   });
 
@@ -1512,10 +1550,12 @@ export function TakeoffPage() {
         ),
       );
     },
-    onError: (_err, docId) => {
+    onError: (err, docId) => {
       setDocuments((prev) =>
         prev.map((d) => (d.id === docId ? { ...d, extractingTables: false } : d)),
       );
+      const msg = err instanceof Error ? err.message : t('takeoff.extract_failed', 'Table extraction failed');
+      useToastStore.getState().addToast({ type: 'error', title: t('takeoff.error_title', 'Error'), message: msg });
     },
   });
 
@@ -1580,9 +1620,27 @@ export function TakeoffPage() {
 
   const handleFilesSelected = useCallback(
     (files: File[]) => {
-      // Clear any previous upload error toast so stale errors don't linger on retry
+      // Clear any previous warnings so stale errors don't linger on retry
       setUploadErrorToast(null);
+      setDuplicateWarning(null);
       for (const file of files) {
+        // Pre-check: duplicate filename already in this project?
+        const lower = file.name.toLowerCase();
+        const existing = documents.some(
+          (d) => d.filename.toLowerCase() === lower && !d.uploadError,
+        ) || (serverDocuments ?? []).some(
+          (d) => d.filename.toLowerCase() === lower,
+        ) || (viewerDoc?.name?.toLowerCase() === lower);
+        if (existing) {
+          setDuplicateWarning(
+            t('takeoff.duplicate_warning', {
+              defaultValue: 'Ya existe un documento llamado "{{name}}" en este proyecto. Elimínelo primero o cambie el nombre del archivo.',
+              name: file.name,
+            }).replace('{{name}}', file.name),
+          );
+          continue; // skip upload entirely — no temp entry created
+        }
+
         // Create an optimistic local entry immediately
         const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
         const localDoc: UploadedDocument = {
@@ -1597,6 +1655,7 @@ export function TakeoffPage() {
           uploading: true,
         };
         setDocuments((prev) => [...prev, localDoc]);
+        setActiveDocId(tempId);
 
         // Attempt to upload; on success replace the temp entry
         uploadMutation.mutate(file, {
@@ -1616,6 +1675,12 @@ export function TakeoffPage() {
               ),
             );
             setActiveDocId(data.id);
+            setViewerDoc({
+              url: `/api/v1/takeoff/documents/${data.id}/download/`,
+              name: data.filename || file.name,
+              id: data.id,
+            });
+            setActiveTab('measurements');
             // Persist the newly-opened document in the URL so reload keeps
             // it mounted (prevents the "uploaded project disappears on
             // refresh" bug — backend persistence was already fine).
@@ -1623,6 +1688,7 @@ export function TakeoffPage() {
               (prev) => {
                 const next = new URLSearchParams(prev);
                 next.set('doc', data.id);
+                next.set('tab', 'measurements');
                 return next;
               },
               { replace: true },
@@ -1631,21 +1697,28 @@ export function TakeoffPage() {
             // The dual ``createDocumentRecord`` upload that used to live
             // here was removed — see BUG-DUAL-UPLOAD-PDF comment above.
             refetchServerDocuments();
+            queryClient.invalidateQueries({ queryKey: ['documents'] });
           },
           onError: (err) => {
-            // Keep the entry visible with error state instead of removing it
             const msg = err instanceof Error ? err.message : 'Upload failed';
-            setDocuments((prev) =>
-              prev.map((d) =>
-                d.id === tempId ? { ...d, uploading: false, uploadError: msg } : d,
-              ),
-            );
-            setUploadErrorToast(msg);
+            // For duplicate filenames (409), remove temp entry + show popup
+            // instead of a red error card the user can't do anything with.
+            if (err instanceof Error && err.message.toLowerCase().includes('already exists')) {
+              setDocuments((prev) => prev.filter((d) => d.id !== tempId));
+              setDuplicateWarning(msg);
+            } else {
+              setDocuments((prev) =>
+                prev.map((d) =>
+                  d.id === tempId ? { ...d, uploading: false, uploadError: msg } : d,
+                ),
+              );
+              setUploadErrorToast(msg);
+            }
           },
         });
       }
     },
-    [uploadMutation, refetchServerDocuments],
+    [uploadMutation, refetchServerDocuments, queryClient, t, documents, serverDocuments, viewerDoc],
   );
 
   const handleRemoveDocument = useCallback(
@@ -1667,12 +1740,15 @@ export function TakeoffPage() {
       // Best-effort server delete; silently ignore errors for legacy temp ids
       takeoffApi
         .deleteDocument(docId)
-        .then(() => refetchServerDocuments())
+        .then(() => {
+          refetchServerDocuments();
+          void queryClient.invalidateQueries({ queryKey: ['takeoff-documents'] });
+        })
         .catch(() => {
           /* ignore — document may be local-only */
         });
     },
-    [refetchServerDocuments],
+    [queryClient, refetchServerDocuments],
   );
 
   const handleAnalyze = useCallback(
@@ -1803,7 +1879,8 @@ export function TakeoffPage() {
 
   /**
    * Merged list of documents for the filmstrip: server-side uploads (from /v1/takeoff/documents/)
-   * unioned with locally-tracked ones (in-progress uploads, errors, fresh uploads not yet refetched).
+   * unioned with locally-tracked ones (in-progress uploads, errors, fresh uploads not yet refetched)
+   * and the currently-open viewer document so the filmstrip never shows empty while a PDF is loaded.
    * Local entries take precedence when IDs collide (they have upload/analysis state).
    */
   const filmstripDocuments: UploadedDocument[] = useMemo(() => {
@@ -1821,8 +1898,22 @@ export function TakeoffPage() {
       });
     });
     documents.forEach((d) => byId.set(d.id, d));
+    // Surface the currently-open document in the filmstrip even when
+    // serverDocuments hasn't loaded yet or the doc was loaded locally.
+    if (viewerDoc?.id && !byId.has(viewerDoc.id)) {
+      byId.set(viewerDoc.id, {
+        id: viewerDoc.id,
+        filename: viewerDoc.name,
+        pages: 0,
+        size_bytes: 0,
+        uploaded_at: new Date().toISOString(),
+        analysis: null,
+        analyzing: false,
+        extractingTables: false,
+      });
+    }
     return Array.from(byId.values());
-  }, [serverDocuments, documents]);
+  }, [serverDocuments, documents, viewerDoc]);
 
   /** Open a server-side document in the Measurements viewer. */
   const handleOpenDocInViewer = useCallback(
@@ -1844,6 +1935,7 @@ export function TakeoffPage() {
       setViewerDoc({
         url: `/api/v1/takeoff/documents/${docId}/download/`,
         name: doc.filename,
+        id: docId,
       });
       setActiveTab('measurements');
       // Pin the current doc to the URL so reload restores the viewer.
@@ -2068,6 +2160,27 @@ export function TakeoffPage() {
       </button>
       </div>
       </div>
+
+      {/* Duplicate filename warning — rendered outside tabs so visible in both */}
+      {duplicateWarning && (
+        <div className="mt-4 flex items-start gap-3 rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/40 px-5 py-4 animate-fade-in">
+          <AlertTriangle size={18} className="shrink-0 text-amber-600 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-amber-800 dark:text-amber-200">
+              {t('takeoff.duplicate_title', { defaultValue: 'No se puede subir' })}
+            </p>
+            <p className="text-sm text-amber-700 dark:text-amber-300 mt-0.5">
+              {duplicateWarning}
+            </p>
+          </div>
+          <button
+            onClick={() => setDuplicateWarning(null)}
+            className="shrink-0 rounded-md p-1 text-amber-500 hover:text-amber-700 dark:hover:text-amber-300 transition-colors"
+          >
+            <X size={14} />
+          </button>
+        </div>
+      )}
 
       {/* Tab content */}
       {activeTab === 'documents' ? (
@@ -2304,9 +2417,11 @@ export function TakeoffPage() {
                 <TakeoffViewerModule
                   initialPdfUrl={viewerDoc?.url}
                   initialPdfName={viewerDoc?.name}
+                  initialDocId={viewerDoc?.id}
                   initialMeasurementId={initialMeasurementId}
                   recentDocuments={serverDocuments}
                   onOpenRecentDocument={handleOpenDocInViewer}
+                  onLocalFileOpened={(file) => handleFilesSelected([file])}
                 />
               </Suspense>
             )}

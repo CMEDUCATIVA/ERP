@@ -35,14 +35,15 @@ import { useQuery, useQueries } from '@tanstack/react-query';
 import {
   COMMON_CURRENCIES,
   CURRENCY_SYMBOL,
-  RESOURCE_TYPE_BADGE,
   fmtWithCurrency,
   getUnitsForLocale,
   saveCustomUnit,
 } from '../boqHelpers';
-import { RESOURCE_TYPES, getResourceTypeLabel } from '../boqResourceTypes';
+import { getResourceTypeLabel, getResourceTypeOptions } from '../boqResourceTypes';
+import { getResourceTypeBadge } from '@/shared/lib/resourceTypes';
 import { countComments } from '../CommentDrawer';
 import { BIMQuantityPicker } from './BIMQuantityPicker';
+import { useBimPreviewStore } from './useBimPreviewStore';
 import { MiniGeometryPreview } from '@/shared/ui/MiniGeometryPreview';
 import { fetchBIMElementsByIds, fetchBIMElementProperties } from '@/features/bim/api';
 import type { BIMElementData } from '@/shared/ui/BIMViewer/ElementManager';
@@ -1251,24 +1252,29 @@ export function BimLinkCellRenderer(params: ICellRendererParams) {
   const dwgSource = meta.dwg_annotation_source as string | undefined;
   const hasDwgLink = !!dwgAnnotationId || !!dwgDrawingId || !!dwgSource;
 
-  const [showPreview, setShowPreview] = useState(false);
+  const openPreview = useBimPreviewStore((s) => s.openPreview);
   const [showPdfPopover, setShowPdfPopover] = useState(false);
   const [showDwgPopover, setShowDwgPopover] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
   const pdfBtnRef = useRef<HTMLButtonElement>(null);
   const dwgBtnRef = useRef<HTMLButtonElement>(null);
-  const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null);
   const [pdfAnchor, setPdfAnchor] = useState<DOMRect | null>(null);
   const [dwgAnchor, setDwgAnchor] = useState<DOMRect | null>(null);
-  const popoverRef = useRef<HTMLDivElement>(null);
 
+  // The BIM preview open-state lives in useBimPreviewStore (not in this cell
+  // renderer's local state) so a single click survives AG-Grid recreating the
+  // renderer on first focus / `ag-cell-data-changed`. See useBimPreviewStore.
   const handleOpen = useCallback(() => {
-    if (btnRef.current) {
-      setAnchorRect(btnRef.current.getBoundingClientRect());
-    }
-    setShowPreview(true);
+    const rect = btnRef.current?.getBoundingClientRect();
+    if (!rect || !ctx?.bimModelId) return;
     ctx?.onHighlightBIMElements?.(bimLinkIds);
-  }, [bimLinkIds, ctx]);
+    openPreview({
+      rowId: String((data as Record<string, unknown>).id ?? ''),
+      anchorRect: rect,
+      elementIds: bimLinkIds,
+      positionData: data as Record<string, unknown>,
+    });
+  }, [bimLinkIds, ctx, data, openPreview]);
 
   const navigate = useNavigate();
 
@@ -1304,15 +1310,6 @@ export function BimLinkCellRenderer(params: ICellRendererParams) {
   }, [dwgDrawingId, dwgAnnotationId]);
 
   if (!hasBimLink && !hasPdfLink && !hasDwgLink) return null;
-
-  const popoverStyle = anchorRect
-    ? {
-        position: 'fixed' as const,
-        left: Math.min(anchorRect.right + 8, window.innerWidth - 660),
-        top: Math.max(8, Math.min(anchorRect.top - 40, window.innerHeight - 520)),
-        zIndex: 9999,
-      }
-    : undefined;
 
   return (
     <div className="flex items-center justify-center gap-0.5 h-full w-full">
@@ -1420,27 +1417,54 @@ export function BimLinkCellRenderer(params: ICellRendererParams) {
           </>,
           document.body,
         )}
-      {showPreview && anchorRect && ctx?.bimModelId &&
-        createPortal(
-          <>
-            {/* Backdrop blur overlay */}
-            <div
-              className="fixed inset-0 bg-black/30 backdrop-blur-sm z-[9998] animate-fade-in"
-              onClick={() => setShowPreview(false)}
-            />
-            <BimLinkPopover
-              ref={popoverRef}
-              modelId={ctx.bimModelId}
-              elementIds={bimLinkIds}
-              style={popoverStyle!}
-              onClose={() => setShowPreview(false)}
-              positionData={data}
-              onUpdatePosition={ctx?.onUpdatePosition}
-            />
-          </>,
-          document.body,
-        )}
     </div>
+  );
+}
+
+/* ── BimLinkPreviewHost — renders the single, grid-level BIM preview popover ──
+   Mounted once by BOQGrid (outside AG-Grid), it reads the open payload from
+   useBimPreviewStore so the popover survives AG-Grid recreating the cell
+   renderer. This is what makes the BIM-link button open on a SINGLE click. ── */
+export function BimLinkPreviewHost({
+  bimModelId,
+  onUpdatePosition,
+}: {
+  bimModelId: string | null | undefined;
+  onUpdatePosition?: (
+    id: string,
+    data: Record<string, unknown>,
+    oldData: Record<string, unknown>,
+  ) => void;
+}) {
+  const open = useBimPreviewStore((s) => s.open);
+  const closePreview = useBimPreviewStore((s) => s.closePreview);
+
+  if (!open || !bimModelId) return null;
+
+  const { anchorRect, elementIds, positionData } = open;
+  const style: React.CSSProperties = {
+    position: 'fixed',
+    left: Math.min(anchorRect.right + 8, window.innerWidth - 660),
+    top: 24,
+    zIndex: 9999,
+  };
+
+  return createPortal(
+    <>
+      <div
+        className="fixed inset-0 bg-black/30 backdrop-blur-sm z-[9998] animate-fade-in"
+        onClick={closePreview}
+      />
+      <BimLinkPopover
+        modelId={bimModelId}
+        elementIds={elementIds}
+        style={style}
+        onClose={closePreview}
+        positionData={positionData}
+        onUpdatePosition={onUpdatePosition}
+      />
+    </>,
+    document.body,
   );
 }
 
@@ -1839,7 +1863,13 @@ const BimLinkPopover = forwardRef<
                                   ? 'text-emerald-700 dark:text-emerald-400'
                                   : 'text-content-tertiary italic'
                             }`}
-                            title={source === 'parquet' ? 'From Parquet row (DDC export)' : source === 'prop' ? 'From element properties' : 'From element quantities'}
+                            title={
+                              source === 'parquet'
+                                ? t('boq.bim_prop_source_parquet', { defaultValue: 'From Parquet row (DDC export)' })
+                                : source === 'prop'
+                                  ? t('boq.bim_prop_source_prop', { defaultValue: 'From element properties' })
+                                  : t('boq.bim_prop_source_qty', { defaultValue: 'From element quantities' })
+                            }
                           >
                             {paramLabel}
                           </span>
@@ -2946,7 +2976,7 @@ function ResourceTypePicker({
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
 
-  const baseBadge = RESOURCE_TYPE_BADGE[value] ?? RESOURCE_TYPE_BADGE.other ?? { bg: 'bg-gray-100 text-gray-600', label: '?' };
+  const baseBadge = getResourceTypeBadge(value);
   const baseLabel = getResourceTypeLabel(value, t);
   const variantLabel = t('boq.resource_type_variant_chip', { defaultValue: 'Variant' });
   const label = isVariant ? variantLabel : baseLabel;
@@ -3028,8 +3058,8 @@ function ResourceTypePicker({
           style={{ top: pos.top, left: pos.left }}
           onMouseDown={(e) => e.stopPropagation()}
         >
-          {RESOURCE_TYPES.map((rt) => {
-            const b = RESOURCE_TYPE_BADGE[rt.value] ?? RESOURCE_TYPE_BADGE.other ?? { bg: 'bg-gray-100 text-gray-600', label: '?' };
+          {getResourceTypeOptions().map((rt) => {
+            const b = getResourceTypeBadge(rt.value);
             const selected = rt.value === value;
             return (
               <button
@@ -3904,7 +3934,7 @@ export function EditableResourceRow({ data, ctx, slots, leftPad }: { data: Recor
   const renderOrdinalSlot = (width: number) => (
     <span
       key="ordinal"
-      className="shrink-0 inline-flex items-center justify-end self-center pr-2 text-[9px] font-mono whitespace-nowrap overflow-hidden"
+      className="shrink-0 inline-flex items-center justify-end self-center pr-2 mr-3 text-[9px] font-mono whitespace-nowrap overflow-hidden"
       style={{ width: `${width}px` }}
       title={resourceCode
         ? ctx.t('boq.resource_catalog_code', { defaultValue: 'Catalogue code: {{code}}', code: resourceCode })

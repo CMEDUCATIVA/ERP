@@ -3,7 +3,7 @@
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.takeoff.models import AiTakeoffRun, TakeoffDocument, TakeoffMeasurement
@@ -50,6 +50,21 @@ class TakeoffRepository:
         if doc is not None:
             await self.session.delete(doc)
             await self.session.flush()
+
+    async def count_by_filename_in_project(
+        self, filename: str, project_id: uuid.UUID,
+    ) -> int:
+        """Return how many documents already carry this filename in the project."""
+        stmt = (
+            select(func.count())
+            .select_from(TakeoffDocument)
+            .where(
+                TakeoffDocument.filename == filename,
+                TakeoffDocument.project_id == project_id,
+            )
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar_one() or 0
 
 
 class MeasurementRepository:
@@ -113,6 +128,24 @@ class MeasurementRepository:
         if item is not None:
             await self.session.delete(item)
             await self.session.flush()
+
+    async def delete_for_document(self, *document_ids: str) -> int:
+        """Hard-delete every measurement keyed to any of the given document ids.
+
+        A measurement's ``document_id`` is a free-text string that may hold the
+        document UUID or — for rows written before the upload assigned one — the
+        filename, so the caller passes both. Without this, deleting a takeoff
+        document strands its measurements under a now-dead id where no reopen can
+        ever find them and they pile up in the table (D-TKC-UP08). Returns the
+        number of rows removed.
+        """
+        ids = [d for d in document_ids if d]
+        if not ids:
+            return 0
+        stmt = delete(TakeoffMeasurement).where(TakeoffMeasurement.document_id.in_(ids))
+        result = await self.session.execute(stmt)
+        await self.session.flush()
+        return result.rowcount or 0
 
     async def all_for_project(self, project_id: uuid.UUID) -> list[TakeoffMeasurement]:
         """Return all measurements for a project (used for summary/export)."""

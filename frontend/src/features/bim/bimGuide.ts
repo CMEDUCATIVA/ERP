@@ -59,7 +59,7 @@ export const bimGuide: ModuleGuideContent = {
       bodyKey: 'guide.bim.quantities.body',
       bodyDefault:
         'Open Summary to roll up counts, areas and volumes by category and level for the elements currently visible. The numbers come straight from the model geometry, so filter first to scope the takeoff, then feed those quantities into a BOQ position.',
-      spotlightSelector: '[data-guide="bim-summary-button"]',
+      spotlightSelector: '[data-testid="bim-menu-panels"]',
     },
     {
       icon: 'Sparkles',
@@ -68,7 +68,7 @@ export const bimGuide: ModuleGuideContent = {
       bodyKey: 'guide.bim.dashboard.body',
       bodyDefault:
         'Use Color by to paint the model live: validation status, BOQ and document coverage, 5D unit rate or 4D timeline and progress. It is a fast visual check of what is priced, linked, scheduled or still missing across the whole model.',
-      spotlightSelector: '[data-testid="bim-color-mode-select"]',
+      spotlightSelector: '[data-testid="bim-menu-appearance"]',
     },
   ],
   ctaKey: 'guide.bim.cta',

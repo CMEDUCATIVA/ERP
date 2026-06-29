@@ -428,25 +428,30 @@ export const BIM_TOUR_STEPS: ProductTourStep[] = [
     preferredPosition: 'bottom',
   },
   {
-    selector: '[data-testid="bim-property-search-toggle"]',
+    // Property search now lives inside the "Panels" dropdown — spotlight the
+    // menu trigger so the step lands on a visible element.
+    selector: '[data-testid="bim-menu-panels"]',
     titleKey: 'tour.bim.step.4.title',
     bodyKey: 'tour.bim.step.4.body',
     preferredPosition: 'bottom',
   },
   {
-    selector: '[data-testid="bim-asset-card-toggle"]',
+    // Asset Card toggle now lives inside the "Selection" dropdown.
+    selector: '[data-testid="bim-menu-selection"]',
     titleKey: 'tour.bim.step.5.title',
     bodyKey: 'tour.bim.step.5.body',
     preferredPosition: 'bottom',
   },
   {
-    selector: '[data-testid="bim-tour-linked-boq-button"]',
+    // Linked BOQ panel toggle now lives inside the "Panels" dropdown.
+    selector: '[data-testid="bim-menu-panels"]',
     titleKey: 'tour.bim.step.6.title',
     bodyKey: 'tour.bim.step.6.body',
     preferredPosition: 'bottom',
   },
   {
-    selector: '[data-testid="bim-view-on-map"]',
+    // "View on map" now lives inside the "Go to" dropdown.
+    selector: '[data-testid="bim-menu-goto"]',
     titleKey: 'tour.bim.step.7.title',
     bodyKey: 'tour.bim.step.7.body',
     preferredPosition: 'bottom',

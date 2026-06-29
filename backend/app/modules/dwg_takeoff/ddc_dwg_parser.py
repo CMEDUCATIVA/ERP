@@ -846,10 +846,22 @@ def parse_ddc_dwg_excel(excel_path: str | Path) -> dict[str, Any]:
                 if layer in layers_map:
                     layers_map[layer]["entity_count"] += 1
 
-        # Tag newly added entities with their layout (BlockId)
+        # Tag newly added entities with their CAD space.
+        #
+        # The DDC ``BlockId`` is the owning block-table-record, NOT a layout.
+        # Only ``*Model_Space`` and the ``*Paper_Space[n]`` layout records are
+        # real spaces the sheet strip should offer. Every other BlockId is a
+        # block *definition*: anonymous associative-dimension blocks (``*D####``),
+        # anonymous hatches/groups (``*U####``) and named blocks (e.g. ``_Dot``).
+        # Their internal geometry belongs to wherever the block is INSERTed —
+        # almost always model space — so attributing it to the block record made
+        # the strip list hundreds of blocks as phantom "layouts" and hid those
+        # entities when the user picked Model. Collapse anything that isn't a
+        # real paper-space layout into ``*Model_Space``.
+        space = block_id if block_id.lower().startswith("*paper_space") else "*Model_Space"
         for ent in entities[entity_count_before:]:
-            ent["layout"] = block_id
-            layout_set.add(block_id)
+            ent["layout"] = space
+            layout_set.add(space)
 
     # Fallback extents
     if min_x == float("inf"):

@@ -13,7 +13,7 @@ import { Search, X, Package, Hammer, Cpu, Users, Loader2, Boxes } from 'lucide-r
 import { Button } from '@/shared/ui';
 import { apiGet } from '@/shared/lib/api';
 import { getIntlLocale } from '@/shared/lib/formatters';
-import { getResourceTypeLabel } from './boqResourceTypes';
+import { getResourceTypeBadge, getResourceTypeLabel } from '@/shared/lib/resourceTypes';
 
 /* ── Types ───────────────────────────────────────────────────────────── */
 
@@ -27,6 +27,8 @@ export interface CatalogResource {
   base_price: number;
   currency: string;
   region: string | null;
+  specifications?: Record<string, unknown>;
+  metadata_?: Record<string, unknown>;
 }
 
 export interface CatalogPickerModalProps {
@@ -44,17 +46,6 @@ const TYPE_FILTERS = [
   { key: 'equipment', labelKey: 'catalog.equipment', defaultLabel: 'Equipment', icon: Cpu },
   { key: 'operator', labelKey: 'catalog.operator', defaultLabel: 'Operator', icon: Users },
 ] as const;
-
-/* ── Type badge colors (mirrors RESOURCE_TYPE_BADGE from boqHelpers) ── */
-
-const TYPE_BADGE_STYLE: Record<string, string> = {
-  material: 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300',
-  labor: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300',
-  equipment: 'bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300',
-  operator: 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300',
-  subcontractor: 'bg-pink-100 text-pink-700 dark:bg-pink-900/40 dark:text-pink-300',
-  other: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400',
-};
 
 /* ── Component ───────────────────────────────────────────────────────── */
 
@@ -274,7 +265,7 @@ export function CatalogPickerModal({ open, onClose, onSelect }: CatalogPickerMod
           ) : (
             <div className="divide-y divide-border-light">
               {results.map((res) => {
-                const badgeStyle = TYPE_BADGE_STYLE[res.resource_type] ?? TYPE_BADGE_STYLE.other;
+                const badgeStyle = getResourceTypeBadge(res.resource_type).bg;
                 return (
                   <button
                     key={res.id}
