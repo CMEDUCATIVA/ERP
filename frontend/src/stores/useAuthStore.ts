@@ -136,7 +136,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   loadFromStorage: () => {
     const localToken = localStorage.getItem(KEY_ACCESS);
-    const localRefresh = localStorage.getItem(KEY_REFRESH);
     const sessionToken = sessionStorage.getItem(KEY_ACCESS);
     const sessionRefresh = sessionStorage.getItem(KEY_REFRESH);
     const token = localToken || sessionToken;
