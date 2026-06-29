@@ -1402,33 +1402,48 @@ def create_app() -> FastAPI:
         # will start raising OperationalError as soon as a request hits a
         # new column. ``None`` if the check itself blew up (no alembic.ini
         # nearby, broken script tree, etc.) - visible but non-fatal.
-        try:
-            from alembic.config import Config as _AlembicConfig
-            from alembic.runtime.migration import MigrationContext as _MigCtx
-            from alembic.script import ScriptDirectory as _ScriptDir
-            from sqlalchemy import text as _text  # noqa: F401
+        #
+        # CACHED for 60s: this is a 2-query + script-tree check. A heavy DWG/IFC
+        # conversion saturates the single worker, and paying it on every 30s
+        # health ping made /api/health take 5-7s under load, tripping the
+        # container healthcheck and restarting the container mid-conversion. The
+        # head/revision only change on deploy, so a short cache is safe.
+        _alembic_cache = getattr(app.state, "_health_alembic_cache", None)
+        _now_mono = time.monotonic()
+        if _alembic_cache is not None and _now_mono - _alembic_cache[0] < 60.0:
+            result["alembic_head_matches"] = _alembic_cache[1]
+            if _alembic_cache[1] is False:
+                result["status"] = "degraded"
+        else:
+            _matches: bool | None
+            try:
+                from alembic.config import Config as _AlembicConfig
+                from alembic.runtime.migration import MigrationContext as _MigCtx
+                from alembic.script import ScriptDirectory as _ScriptDir
 
-            from app.database import engine as _engine
+                from app.database import engine as _engine
 
-            _ini = _Path(__file__).resolve().parent.parent / "alembic.ini"
-            if _ini.is_file():
-                _cfg = _AlembicConfig(str(_ini))
-                _cfg.set_main_option("script_location", str(_ini.parent / "alembic"))
-                _script = _ScriptDir.from_config(_cfg)
-                _expected = _script.get_current_head()
+                _ini = _Path(__file__).resolve().parent.parent / "alembic.ini"
+                if _ini.is_file():
+                    _cfg = _AlembicConfig(str(_ini))
+                    _cfg.set_main_option("script_location", str(_ini.parent / "alembic"))
+                    _script = _ScriptDir.from_config(_cfg)
+                    _expected = _script.get_current_head()
 
-                async with _engine.connect() as _conn:
-                    _actual = await _conn.run_sync(
-                        lambda sync_conn: _MigCtx.configure(sync_conn).get_current_revision()
-                    )
-                result["alembic_head_matches"] = _expected == _actual
-                if _expected != _actual:
-                    result["status"] = "degraded"
-            else:
-                result["alembic_head_matches"] = None
-        except Exception as _exc:  # noqa: BLE001
-            logger.warning("Alembic head check failed: %s", _exc)
-            result["alembic_head_matches"] = None
+                    async with _engine.connect() as _conn:
+                        _actual = await _conn.run_sync(
+                            lambda sync_conn: _MigCtx.configure(sync_conn).get_current_revision()
+                        )
+                    _matches = _expected == _actual
+                else:
+                    _matches = None
+            except Exception as _exc:  # noqa: BLE001
+                logger.warning("Alembic head check failed: %s", _exc)
+                _matches = None
+            result["alembic_head_matches"] = _matches
+            if _matches is False:
+                result["status"] = "degraded"
+            app.state._health_alembic_cache = (_now_mono, _matches)
 
         # Frontend dist presence - the wheel ships ``app/_frontend_dist/``,
         # a repo checkout serves ``frontend/dist``; a missing ``index.html``

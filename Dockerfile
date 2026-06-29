@@ -53,7 +53,13 @@ ENV PYTHONUNBUFFERED=1 \
 EXPOSE 8080
 VOLUME ["/data"]
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-    CMD curl -f http://localhost:8080/api/health || exit 1
+# Tolerant healthcheck: a heavy DWG/IFC conversion saturates the single worker
+# and can make /api/health take several seconds for a while. The old
+# timeout=5s/retries=3 marked the container unhealthy and restarted it MID-
+# conversion (killing the job and returning 502s during the ~30s reboot).
+# Generous timeout + retries + a longer start-period (the app loads 125 modules
+# on boot) keep transient slowness from triggering a false-unhealthy restart.
+HEALTHCHECK --interval=30s --timeout=30s --start-period=90s --retries=6 \
+    CMD curl -fsS --max-time 25 http://localhost:8080/api/health || exit 1
 
 ENTRYPOINT ["/app/entrypoint.sh"]
