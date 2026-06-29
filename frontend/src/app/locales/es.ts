@@ -9582,6 +9582,7 @@ const resource = {
     "dwg_takeoff.conv_step_render": "Abriendo el visor",
     "dwg_takeoff.conv_step_render_hint": "Verás el plano aquí en cuanto lleguen las entidades.",
     "dwg_takeoff.conv_note": "Puedes ir a otras páginas con tranquilidad: la conversión se ejecuta en el servidor. El plano estará listo aquí cuando vuelvas.",
+    "dwg_takeoff.conv_poll_error": "No se pudo contactar con el servidor para consultar el estado de la conversión. Reintentando automáticamente; si persiste, puede que el servidor esté caído: pide a un administrador que revise los logs.",
     "dwg_takeoff.conv_cancel": "Cancelar - eliminar este plano",
     "dwg_takeoff.toggle_layer_visibility": "Mostrar u ocultar capa",
     "dwg_takeoff.layers": "Capas",

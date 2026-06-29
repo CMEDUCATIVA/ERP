@@ -957,7 +957,7 @@ export function DwgTakeoffPage() {
     () => drawings.find((d) => d.id === selectedDrawingId),
     [drawings, selectedDrawingId],
   );
-  const { data: liveDrawing } = useQuery({
+  const { data: liveDrawing, isError: drawingPollError } = useQuery({
     queryKey: ['dwg-drawing', selectedDrawingId],
     queryFn: () => fetchDrawing(selectedDrawingId!),
     // Always fetch the single drawing (not just while converting): the
@@ -2967,6 +2967,7 @@ export function DwgTakeoffPage() {
                   ? new Date(selectedDrawingFromList.created_at).getTime()
                   : Date.now()
               }
+              pollError={drawingPollError}
               onCancel={() => setConfirmDeleteId(selectedDrawingId)}
             />
           ) : isErrorStatus ? (
@@ -5586,12 +5587,16 @@ function ConversionProgressCard({
   status,
   startedAt,
   onCancel,
+  pollError = false,
 }: {
   drawingName: string;
   filename: string;
   status: string | null;
   startedAt: number;
   onCancel?: () => void;
+  /** True when the status-polling request is currently failing (server/network
+   *  error) — a real error signal, not a time heuristic. */
+  pollError?: boolean;
 }) {
   const { t } = useTranslation();
   const [, force] = useState(0);
@@ -5778,6 +5783,25 @@ function ConversionProgressCard({
             );
           })}
         </ol>
+
+        {/* Real error signal: the status-polling request is failing right now
+            (server 500 / network), not a time guess. Shown only while it is
+            actually erroring; clears automatically when a poll succeeds. */}
+        {pollError && (
+          <div
+            className="mt-5 rounded-lg bg-red-500/10 border border-red-500/30 px-3 py-2.5 text-[11px] text-red-700 dark:text-red-300 leading-relaxed flex items-start gap-2"
+            role="alert"
+            data-testid="dwg-conversion-poll-error"
+          >
+            <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+            <span>
+              {t('dwg_takeoff.conv_poll_error', {
+                defaultValue:
+                  'Could not reach the server to check the conversion status. Retrying automatically — if this persists, the server may be down; ask an admin to check the logs.',
+              })}
+            </span>
+          </div>
+        )}
 
         <div className="mt-5 rounded-lg bg-amber-500/5 border border-amber-500/20 px-3 py-2.5 text-[11px] text-amber-700 dark:text-amber-300 leading-relaxed">
           {t('dwg_takeoff.conv_note', {
