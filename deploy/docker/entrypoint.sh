@@ -49,22 +49,29 @@ esac
 # the app config derive the sync URL from DATABASE_URL — the exact host the app
 # uses. Retry a few times in case the DB isn't reachable yet at boot. `set -eu`
 # aborts startup if migrations ultimately fail, rather than serving a broken schema.
-echo "Applying database migrations (alembic upgrade head)…"
+# Best-effort alembic upgrade. NOTE: the app ALSO self-heals the schema on boot
+# via postgres_auto_migrate (adds any missing model columns with ADD COLUMN IF
+# NOT EXISTS) + create_all (missing tables), so this step is a safety net, not
+# the primary mechanism — and it is a no-op on installs whose alembic_version is
+# stamped at head (the create_all + stamp pattern). Therefore it must be
+# NON-FATAL: a DB hiccup here must not crash-loop the container, because the app
+# will heal the schema anyway. We unset DATABASE_SYNC_URL so alembic follows the
+# same host as DATABASE_URL (a mismatched sync host failed DNS before).
+echo "Applying database migrations (best-effort alembic upgrade head)…"
 (
   cd /app/backend
   unset DATABASE_SYNC_URL
   n=0
   until alembic upgrade head; do
     n=$((n + 1))
-    if [ "$n" -ge 20 ]; then
-      echo "ERROR: alembic upgrade head failed after ${n} attempts; aborting startup." >&2
-      exit 1
+    if [ "$n" -ge 6 ]; then
+      echo "NOTE: alembic upgrade head did not complete after ${n} tries; continuing — the app self-heals missing columns/tables on boot." >&2
+      break
     fi
-    echo "DB not ready or migration failed (attempt ${n}/20); retrying in 3s…" >&2
+    echo "DB not ready for alembic (attempt ${n}/6); retrying in 3s…" >&2
     sleep 3
   done
-)
-echo "Database schema is up to date."
+) || echo "NOTE: migration step errored; continuing startup (app self-heals schema)." >&2
 
 exec python -m uvicorn app.main:create_app \
   --factory --host 0.0.0.0 --port 8080 \
