@@ -37,6 +37,16 @@ case "${DATABASE_URL:-}" in
     ;;
 esac
 
+# Apply database migrations before serving. The deployed code and the DB
+# schema MUST match: a missing column (e.g. oe_projects_project.regional_factor
+# from migration v3187) makes every ORM query 500, which manifested as DWG/PDF
+# conversions hanging because each project load failed. alembic derives the sync
+# (psycopg2) URL from DATABASE_URL automatically. `set -eu` aborts startup loudly
+# on a failed migration instead of serving against a broken schema.
+echo "Applying database migrations (alembic upgrade head)…"
+( cd /app/backend && alembic upgrade head )
+echo "Database schema is up to date."
+
 exec python -m uvicorn app.main:create_app \
   --factory --host 0.0.0.0 --port 8080 \
   --app-dir /app/backend
