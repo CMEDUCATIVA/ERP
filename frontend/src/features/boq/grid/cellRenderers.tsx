@@ -26,12 +26,13 @@ import {
   FileBox,
   CheckCircle2,
   ExternalLink,
+  Link2Off,
   Check,
   AlertTriangle,
   Link2,
 } from 'lucide-react';
 import { createPortal } from 'react-dom';
-import { useQuery, useQueries } from '@tanstack/react-query';
+import { useQuery, useQueries, useQueryClient } from '@tanstack/react-query';
 import {
   COMMON_CURRENCIES,
   CURRENCY_SYMBOL,
@@ -45,7 +46,7 @@ import { countComments } from '../CommentDrawer';
 import { BIMQuantityPicker } from './BIMQuantityPicker';
 import { useBimPreviewStore } from './useBimPreviewStore';
 import { MiniGeometryPreview } from '@/shared/ui/MiniGeometryPreview';
-import { fetchBIMElementsByIds, fetchBIMElementProperties } from '@/features/bim/api';
+import { fetchBIMElementsByIds, fetchBIMElementProperties, listLinks, deleteLink } from '@/features/bim/api';
 import type { BIMElementData } from '@/shared/ui/BIMViewer/ElementManager';
 import { getIntlLocale } from '@/shared/lib/formatters';
 import { useFxRatesStore, getFxRate } from '@/stores/useFxRatesStore';
@@ -1316,11 +1317,14 @@ export function BimLinkCellRenderer(params: ICellRendererParams) {
       {hasBimLink && (
         <button
           ref={btnRef}
-          onClick={(e) => {
+          onMouseDown={(e) => {
+            // Open on mousedown, not click: AG-Grid focuses & recreates the
+            // cell renderer on the first click, swallowing it so the popover
+            // needed two clicks. mousedown fires before that focus re-render.
             e.stopPropagation();
+            e.preventDefault();
             handleOpen();
           }}
-          onMouseDown={(e) => e.stopPropagation()}
           className="h-6 px-1.5 inline-flex items-center gap-0.5 rounded
                      bg-oe-blue/10 text-oe-blue text-[10px] font-semibold
                      hover:bg-oe-blue/25 transition-colors cursor-pointer"
@@ -1600,6 +1604,36 @@ const BimLinkPopover = forwardRef<
   const currentQuantity = typeof positionData?.quantity === 'number' ? positionData.quantity : 0;
   const canApply = !!positionData?.id && !!onUpdatePosition;
 
+  // Unlink every BIM element from this BOQ position (from the budget side).
+  // The aggregated preview has element ids, not link ids, so fetch the raw
+  // links for the position and delete each, then refresh the grid + close.
+  const qc = useQueryClient();
+  const [unlinkingAll, setUnlinkingAll] = useState(false);
+  const handleUnlinkAll = useCallback(async () => {
+    const posId = positionData?.id as string | undefined;
+    if (!posId) return;
+    if (
+      !window.confirm(
+        t('boq.unlink_all_confirm', {
+          defaultValue: 'Unlink the {{count}} BIM element(s) from this BOQ item?',
+          count: elementIds.length,
+        }),
+      )
+    )
+      return;
+    setUnlinkingAll(true);
+    try {
+      const { items } = await listLinks(posId);
+      await Promise.all(items.map((lnk) => deleteLink(lnk.id)));
+      qc.invalidateQueries({ queryKey: ['boq'] });
+      qc.invalidateQueries({ queryKey: ['bim-model-boq-links'] });
+      qc.invalidateQueries({ queryKey: ['bim-link-preview'] });
+      onClose();
+    } finally {
+      setUnlinkingAll(false);
+    }
+  }, [positionData, elementIds.length, qc, onClose, t]);
+
   const handleUseQuantity = useCallback(
     (value: number, source: string) => {
       if (!positionData?.id || !onUpdatePosition) return;
@@ -1772,6 +1806,22 @@ const BimLinkPopover = forwardRef<
           </span>
         </div>
         <div className="flex items-center gap-1">
+          {canApply && elementIds.length > 0 && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleUnlinkAll();
+              }}
+              disabled={unlinkingAll}
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold
+                         text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-colors disabled:opacity-50"
+              title={t('boq.unlink_all_title', { defaultValue: 'Unlink all BIM elements from this BOQ item' })}
+            >
+              <Link2Off size={11} />
+              {t('boq.unlink_all', { defaultValue: 'Unlink all' })}
+            </button>
+          )}
           <button
             type="button"
             onClick={(e) => {

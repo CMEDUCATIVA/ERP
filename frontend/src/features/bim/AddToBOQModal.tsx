@@ -306,6 +306,10 @@ export default function AddToBOQModal({
         }),
       });
       qc.invalidateQueries({ queryKey: ['bim-elements'] });
+      // Also refresh the BOQ grid (cad_element_ids drives the link badge) and
+      // the viewer's "Linked BOQ" panel, so a new link shows without a reload.
+      qc.invalidateQueries({ queryKey: ['bim-model-boq-links'] });
+      qc.invalidateQueries({ queryKey: ['boq'] });
       onLinked?.();
       onClose();
     },
@@ -365,6 +369,7 @@ export default function AddToBOQModal({
         }),
       });
       qc.invalidateQueries({ queryKey: ['bim-elements'] });
+      qc.invalidateQueries({ queryKey: ['bim-model-boq-links'] });
       qc.invalidateQueries({ queryKey: ['boq-positions-for-link', selectedBOQId] });
       qc.invalidateQueries({ queryKey: ['boq'] });
       onLinked?.();
