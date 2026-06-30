@@ -608,8 +608,19 @@ class CatalogResourceService:
         return CatalogStatsResponse(
             total=total,
             by_type=[CatalogTypeStat(resource_type=rt, count=c) for rt, c in by_type_raw],
-            by_category=[CatalogCategoryStat(category=cat, count=c) for cat, c in by_category_raw],
+            by_category=[
+                CatalogCategoryStat(category=cat, count=c, code=code) for cat, c, code in by_category_raw
+            ],
         )
+
+    async def next_code_for_prefix(self, prefix: str) -> str:
+        """Mint the next free resource code for ``prefix`` (TT type + CC
+        category) in our ``TT+CC+NNNNNN`` scheme. The correlative is padded so
+        the full code reaches 10 digits (6 digits for a 4-char prefix).
+        """
+        best = await self.repo.max_code_suffix(prefix)
+        width = max(1, 10 - len(prefix))
+        return f"{prefix}{best + 1:0{width}d}"
 
     # ── Regions ─────────────────────────────────────────────────────────
 

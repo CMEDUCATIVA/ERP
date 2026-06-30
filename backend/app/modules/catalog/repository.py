@@ -160,15 +160,25 @@ class CatalogResourceRepository:
         result = await self.session.execute(stmt)
         return list(result.all())
 
-    async def stats_by_category(self, region: str | None = None) -> list[tuple[str, int]]:
-        """Count of active resources grouped by category.
+    async def stats_by_category(self, region: str | None = None) -> list[tuple[str, int, str]]:
+        """Count of active resources grouped by category, with the 2-digit
+        category code derived from each category's ``resource_code``.
 
         Scoped by ``region`` when supplied - otherwise a category badge
         could show a non-zero count while the region-filtered list under
         it is empty (the reported "count says N but No resources found").
+
+        The code is the 3rd-4th characters of ``resource_code`` (our scheme
+        is ``TT`` type + ``CC`` category + ``NNNNNN`` correlative). We take
+        ``min(substr(...))`` so the combobox can show/seed the category code
+        straight from the data, with no dependency on browser localStorage.
+        Numeric codes sort before legacy ``CAT-...`` codes, so when a name
+        carries both formats the numeric one wins; the frontend ignores any
+        value that is not exactly two digits.
         """
+        code_expr = func.min(func.substr(CatalogResource.resource_code, 3, 2))
         stmt = (
-            select(CatalogResource.category, func.count())
+            select(CatalogResource.category, func.count(), code_expr)
             .where(CatalogResource.is_active.is_(True))
             .group_by(CatalogResource.category)
             .order_by(func.count().desc())
@@ -176,7 +186,7 @@ class CatalogResourceRepository:
         if region:
             stmt = stmt.where(CatalogResource.region == region)
         result = await self.session.execute(stmt)
-        return list(result.all())
+        return [(cat, count, code or "") for cat, count, code in result.all()]
 
     async def stats_by_region(self) -> list[dict[str, object]]:
         """Count of active resources grouped by region (non-null only)."""
@@ -191,6 +201,28 @@ class CatalogResourceRepository:
         )
         result = await self.session.execute(stmt)
         return [{"region": region, "count": count} for region, count in result.all()]
+
+    async def max_code_suffix(self, prefix: str) -> int:
+        """Largest numeric correlative among resource_codes starting with
+        ``prefix`` (our scheme is ``TT`` type + ``CC`` category + ``NNNNNN``).
+
+        Used to mint the next free code for a prefix. Codes are globally
+        unique, so this scans every region. The numeric tail is read in
+        Python (the set sharing a prefix is small) to stay portable across
+        Postgres and SQLite without DB-specific regex/cast.
+        """
+        like = prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        stmt = select(CatalogResource.resource_code).where(
+            CatalogResource.resource_code.like(f"{like}%", escape="\\")
+        )
+        rows = (await self.session.execute(stmt)).scalars().all()
+        plen = len(prefix)
+        best = 0
+        for code in rows:
+            tail = code[plen:]
+            if code[:plen] == prefix and tail.isdigit():
+                best = max(best, int(tail))
+        return best
 
     async def delete_by_region(self, region: str) -> int:
         """Hard-delete all resources for a given region. Returns count deleted."""
