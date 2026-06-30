@@ -82,12 +82,13 @@ async def _verify_assembly_owner(
 ) -> None:
     """‌⁠‍Load an assembly and verify ownership.
 
-    Admins bypass the check via the role claim on the JWT payload.
+    Admins and managers (elevated roles) bypass the check via the role claim
+    on the JWT payload.
 
     Returns 404 (not 403) on ownership mismatch so attackers cannot
     enumerate valid assembly UUIDs by probing for 403 responses.
     """
-    if payload and payload.get("role") == "admin":
+    if payload and payload.get("role") in ("admin", "manager"):
         return
 
     from app.modules.assemblies.repository import AssemblyRepository
@@ -118,9 +119,10 @@ async def _verify_target_boq_owner(
 
     Used by `apply_to_boq` to prevent cross-tenant injection of assembly
     positions into someone else's BOQ. Mirrors ``boq.router._verify_boq_owner``
-    but lives here to avoid a circular import at module load time.
+    but lives here to avoid a circular import at module load time. Admins and
+    managers (elevated roles) bypass the ownership check.
     """
-    if payload and payload.get("role") == "admin":
+    if payload and payload.get("role") in ("admin", "manager"):
         return
 
     from app.modules.boq.repository import BOQRepository
