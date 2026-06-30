@@ -87,6 +87,9 @@ frontend/stats.html
 *.log
 logs/
 
+# Local methodology / framework docs (kept local, not versioned)
+1-ESTRUCTURA/
+
 # Generated
 # backend/locales/ — kept tracked: stub locales ship with the wheel,
 # auto-generation now happens on top of tracked baselines so new
