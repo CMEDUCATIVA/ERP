@@ -71,6 +71,15 @@ function getCategoryColor(catValue: string): 'blue' | 'success' | 'warning' | 'e
   return CATEGORY_PALETTE[customIdx] ?? 'neutral';
 };
 
+// Friendly category label: the CAPECO name (e.g. "Albanileria") instead of the
+// raw stored value ("05_albanileria"). Custom categories drop a leading "NN_"
+// prefix and turn underscores into spaces.
+function getCategoryLabel(catValue: string): string {
+  const found = CAPECO_CATEGORIES.find((c) => c.value === catValue);
+  if (found) return found.label;
+  return catValue.replace(/^\d+_/, '').replace(/_/g, ' ').trim();
+};
+
 const UNIT_OPTIONS = unitKeys();
 
 /* Templates removed — assemblies are managed via New/AI Generate/Clone/Save from BOQ */
@@ -615,7 +624,7 @@ export function AssembliesPage() {
             label={t('assemblies.stat_top_categories', { defaultValue: 'Top categories' })}
             value={
               banner.topCategories.length > 0
-                ? banner.topCategories.map(([c, n]) => `${c} (${n})`).join(', ')
+                ? banner.topCategories.map(([c, n]) => `${getCategoryLabel(c)} (${n})`).join(', ')
                 : '—'
             }
             valueClassName="text-xs leading-snug"
@@ -664,7 +673,7 @@ export function AssembliesPage() {
                   }`}
                   title={t('assemblies.filter_by_category', { defaultValue: 'Filter by category' })}
                 >
-                  <span className="capitalize">{cat}</span>
+                  <span>{getCategoryLabel(cat)}</span>
                   <span className={active ? 'text-white/80' : 'text-content-tertiary'}>({count})</span>
                 </button>
               );
@@ -1247,7 +1256,7 @@ function AssemblyTable({
                   <td className="px-3 py-2 align-middle font-mono text-xs text-content-tertiary">{a.code}</td>
                   <td className="px-3 py-2 align-middle">
                     {a.category ? (
-                      <Badge variant={getCategoryColor(a.category) ?? 'neutral'} size="sm">{a.category}</Badge>
+                      <Badge variant={getCategoryColor(a.category) ?? 'neutral'} size="sm">{getCategoryLabel(a.category)}</Badge>
                     ) : (
                       <span className="text-content-quaternary">—</span>
                     )}
@@ -1966,7 +1975,7 @@ function AssemblyCard({
         <div className="mt-1.5 flex flex-wrap items-center gap-1">
           {assembly.category && (
             <Badge variant={badgeVariant} size="sm">
-              {assembly.category}
+              {getCategoryLabel(assembly.category)}
             </Badge>
           )}
           <Badge variant="neutral" size="sm">
