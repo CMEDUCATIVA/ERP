@@ -2080,51 +2080,64 @@ const BimLinkPopover = forwardRef<
                 {t('boq.loading_element_data', { defaultValue: 'Loading element data...' })}
               </div>
             )}
-            {!isLoading && elements.map((el) => {
-              const isSel = selectedElementId === el.id;
-              const hasLink = linkIdByElement.has(el.id);
-              return (
-                <div
-                  key={el.id}
-                  onClick={() => setSelectedElementId(isSel ? null : el.id)}
-                  title={t('boq.focus_element_3d', { defaultValue: 'Click to focus this element in 3D' })}
-                  className={`group/elrow px-3 py-2 border-b border-border-light/50 dark:border-border-dark/50 last:border-b-0 cursor-pointer transition-colors ${
-                    isSel
-                      ? 'bg-oe-blue/10 border-s-2 border-s-oe-blue'
-                      : 'hover:bg-surface-secondary/60 border-s-2 border-s-transparent'
-                  }`}
-                >
-                  <div className="flex items-center gap-2">
-                    <Cuboid size={11} className={`shrink-0 ${isSel ? 'text-oe-blue' : 'text-oe-blue/60'}`} />
-                    <div className="min-w-0 flex-1">
-                      <div className="text-[11px] font-medium text-content-primary truncate">
-                        {el.name || el.element_type}
+            {!isLoading &&
+              elementIds.map((elId) => {
+                // Map over every LINKED id (not just the resolved elements) so an
+                // orphan link — an id that no longer exists in the model (e.g. the
+                // IFC was re-uploaded) — still shows here with its own unlink, and
+                // the header count matches the list.
+                const el = elements.find((e) => e.id === elId);
+                const isSel = selectedElementId === elId;
+                const hasLink = linkIdByElement.has(elId);
+                return (
+                  <div
+                    key={elId}
+                    onClick={() => setSelectedElementId(isSel ? null : elId)}
+                    title={t('boq.focus_element_3d', { defaultValue: 'Click to focus this element in 3D' })}
+                    className={`group/elrow px-3 py-2 border-b border-border-light/50 dark:border-border-dark/50 last:border-b-0 cursor-pointer transition-colors ${
+                      isSel
+                        ? 'bg-oe-blue/10 border-s-2 border-s-oe-blue'
+                        : 'hover:bg-surface-secondary/60 border-s-2 border-s-transparent'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <Cuboid
+                        size={11}
+                        className={`shrink-0 ${isSel ? 'text-oe-blue' : el ? 'text-oe-blue/60' : 'text-amber-500/70'}`}
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="text-[11px] font-medium text-content-primary truncate">
+                          {el
+                            ? el.name || el.element_type
+                            : t('boq.element_missing', { defaultValue: 'Element not found in model' })}
+                        </div>
+                        <div className="text-[9px] text-content-tertiary font-mono truncate">
+                          {el ? el.element_type : elId}
+                        </div>
                       </div>
-                      <div className="text-[9px] text-content-tertiary font-mono">{el.element_type}</div>
+                      {canApply && hasLink && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleUnlinkOne(elId);
+                          }}
+                          disabled={unlinkingOne === elId}
+                          title={t('boq.unlink_one', { defaultValue: 'Unlink this element' })}
+                          aria-label={t('boq.unlink_one', { defaultValue: 'Unlink this element' })}
+                          className="shrink-0 p-1 rounded text-content-tertiary hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 opacity-0 group-hover/elrow:opacity-100 focus:opacity-100 transition-all disabled:opacity-50"
+                        >
+                          {unlinkingOne === elId ? (
+                            <Loader2 size={11} className="animate-spin" />
+                          ) : (
+                            <Link2Off size={11} />
+                          )}
+                        </button>
+                      )}
                     </div>
-                    {canApply && hasLink && (
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleUnlinkOne(el.id);
-                        }}
-                        disabled={unlinkingOne === el.id}
-                        title={t('boq.unlink_one', { defaultValue: 'Unlink this element' })}
-                        aria-label={t('boq.unlink_one', { defaultValue: 'Unlink this element' })}
-                        className="shrink-0 p-1 rounded text-content-tertiary hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 opacity-0 group-hover/elrow:opacity-100 focus:opacity-100 transition-all disabled:opacity-50"
-                      >
-                        {unlinkingOne === el.id ? (
-                          <Loader2 size={11} className="animate-spin" />
-                        ) : (
-                          <Link2Off size={11} />
-                        )}
-                      </button>
-                    )}
                   </div>
-                </div>
-              );
-            })}
+                );
+              })}
           </div>
         </div>
 
