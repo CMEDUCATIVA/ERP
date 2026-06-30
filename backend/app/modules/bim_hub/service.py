@@ -1855,9 +1855,16 @@ class BIMHubService:
         so legacy consumers that read that JSON array stay in sync with
         the canonical ``oe_bim_boq_link`` table.
         """
+        logger.info(
+            "[BIM->BOQ] link request received: position=%s element=%s type=%s",
+            data.boq_position_id, data.bim_element_id, data.link_type,
+        )
         # Verify element exists
         element = await self.element_repo.get(data.bim_element_id)
         if element is None:
+            logger.warning(
+                "[BIM->BOQ] link ABORTED: BIM element %s not found", data.bim_element_id
+            )
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="BIM element not found",
@@ -1955,14 +1962,28 @@ class BIMHubService:
         """
         pos = await self.session.get(Position, position_id)
         if pos is None:
+            logger.warning(
+                "[BIM->BOQ] cad-mirror SKIPPED: BOQ position %s NOT FOUND -> "
+                "cad_element_ids not updated, the BOQ grid badge will stay hidden",
+                position_id,
+            )
             return
         current = list(pos.cad_element_ids or [])
         elem_str = str(element_id)
-        if elem_str not in current:
-            current.append(elem_str)
-            pos.cad_element_ids = current
-            # Re-assign to force SQLAlchemy to notice the mutation on JSON.
-            await self.session.flush()
+        if elem_str in current:
+            logger.info(
+                "[BIM->BOQ] cad-mirror: element %s already on position %s (cad_element_ids=%s)",
+                elem_str, position_id, current,
+            )
+            return
+        current.append(elem_str)
+        pos.cad_element_ids = current
+        # Re-assign to force SQLAlchemy to notice the mutation on JSON.
+        await self.session.flush()
+        logger.info(
+            "[BIM->BOQ] cad-mirror UPDATED: position %s cad_element_ids -> %s",
+            position_id, current,
+        )
 
     async def _sync_boq_quantity_from_links(
         self,
@@ -1996,11 +2017,17 @@ class BIMHubService:
         """
         pos = await self.session.get(Position, position_id)
         if pos is None:
+            logger.warning("[BIM->BOQ] qty-sync SKIPPED: position %s not found", position_id)
             return
 
         links = await self.link_repo.list_by_boq_position(position_id)
         if not links:
+            logger.info("[BIM->BOQ] qty-sync: position %s has no links yet", position_id)
             return
+        logger.info(
+            "[BIM->BOQ] qty-sync: position %s has %d linked element(s), unit=%r",
+            position_id, len(links), pos.unit,
+        )
 
         # Canonical ASCII unit token (m³→m3, M2→m2, …) so the mapping
         # below is locale/encoding independent.

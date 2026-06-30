@@ -3078,6 +3078,23 @@ async def list_models(
     await _verify_project_access(service.session, project_id, user_id or "")
     items, total = await service.list_models(project_id, offset=offset, limit=limit)
 
+    # [BIM->BOQ] The BOQ grid only shows the BIM-link badge when a model here has
+    # status=='ready' AND element_count>0 (BOQEditorPage bimModelId gate). Log
+    # every model's status/count so we can see, server-side, whether the gate
+    # would pass for this project.
+    logger.info(
+        "[BIM->BOQ] models for project=%s -> %s",
+        project_id,
+        [
+            {
+                "id": str(getattr(m, "id", "")),
+                "status": getattr(m, "status", None),
+                "element_count": getattr(m, "element_count", None),
+            }
+            for m in items
+        ],
+    )
+
     # Batched storage probe: ONE list_prefix sweep against the backend
     # collects artifact/original/geometry info for every model in the
     # page. Replaces the previous asyncio.gather fan-out which issued
