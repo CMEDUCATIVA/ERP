@@ -1,10 +1,10 @@
 import { useMemo, useState, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useQuery } from '@tanstack/react-query';
-import { Search, X, Link2, Hash, ExternalLink, Loader2 } from 'lucide-react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { Search, X, Link2, Link2Off, Hash, ExternalLink, Loader2 } from 'lucide-react';
 import type { BIMElementData } from '@/shared/ui/BIMViewer';
 import type { BIMBOQLinkBrief } from '@/shared/ui/BIMViewer/ElementManager';
-import { fetchBIMModelBOQLinks } from './api';
+import { fetchBIMModelBOQLinks, listLinks, deleteLink } from './api';
 
 interface AggregatedPosition {
   boq_position_id: string;
@@ -36,8 +36,28 @@ export default function BIMLinkedBOQPanel({
   boqId,
 }: BIMLinkedBOQPanelProps) {
   const { t } = useTranslation();
+  const qc = useQueryClient();
   const [search, setSearch] = useState('');
   const [activePositionId, setActivePositionId] = useState<string | null>(null);
+  const [unlinkingId, setUnlinkingId] = useState<string | null>(null);
+
+  // Remove every BIM↔BOQ link for a position. The aggregated endpoint groups
+  // by position and does not carry link ids, so fetch the raw links for the
+  // position and delete each, then refresh.
+  const handleUnlink = useCallback(
+    async (positionId: string) => {
+      setUnlinkingId(positionId);
+      try {
+        const { items } = await listLinks(positionId);
+        await Promise.all(items.map((lnk) => deleteLink(lnk.id)));
+        await qc.invalidateQueries({ queryKey: ['bim-model-boq-links', modelId] });
+        await qc.invalidateQueries({ queryKey: ['bim-elements'] });
+      } finally {
+        setUnlinkingId(null);
+      }
+    },
+    [modelId, qc],
+  );
 
   // Viewer loads elements in skeleton mode (no boq_links) for performance
   // on large models, so the panel fetches aggregated links separately.
@@ -228,14 +248,15 @@ export default function BIMLinkedBOQPanel({
         ) : (
           filtered.map((pos) => {
             const isActive = activePositionId === pos.boq_position_id;
+            const isUnlinking = unlinkingId === pos.boq_position_id;
             return (
+              <div key={pos.boq_position_id} className="relative group/row">
               <button
-                key={pos.boq_position_id}
                 type="button"
                 onClick={() => handleRowClick(pos)}
                 aria-label={`${pos.ordinal ?? ''} ${pos.description ?? t('bim.linked_boq_no_desc', { defaultValue: '(no description)' })}`}
                 aria-pressed={isActive}
-                className={`w-full text-start px-4 py-2.5 border-b border-border-light transition-colors ${
+                className={`w-full text-start ps-4 pe-9 py-2.5 border-b border-border-light transition-colors ${
                   isActive
                     ? 'bg-oe-blue/8 border-s-2 border-s-oe-blue'
                     : 'hover:bg-surface-secondary border-s-2 border-s-transparent'
@@ -291,6 +312,21 @@ export default function BIMLinkedBOQPanel({
                   </div>
                 </div>
               </button>
+                <button
+                  type="button"
+                  onClick={() => handleUnlink(pos.boq_position_id)}
+                  disabled={isUnlinking}
+                  title={t('bim.link_remove', { defaultValue: 'Remove link' })}
+                  aria-label={t('bim.link_remove', { defaultValue: 'Remove link' })}
+                  className="absolute top-2 end-2 p-1 rounded text-content-tertiary hover:text-rose-600 hover:bg-rose-50 opacity-0 group-hover/row:opacity-100 focus:opacity-100 transition-opacity disabled:opacity-50"
+                >
+                  {isUnlinking ? (
+                    <Loader2 size={12} className="animate-spin" />
+                  ) : (
+                    <Link2Off size={12} />
+                  )}
+                </button>
+              </div>
             );
           })
         )}
