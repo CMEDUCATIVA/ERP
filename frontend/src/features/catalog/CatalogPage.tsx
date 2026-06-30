@@ -100,6 +100,10 @@ interface CatalogTypeStat {
 interface CatalogCategoryStat {
   category: string;
   count: number;
+  // 2-digit category code derived server-side from the resources'
+  // resource_code (empty when the category has no numeric-coded rows).
+  // Lets imported categories show their code without browser localStorage.
+  code?: string;
 }
 
 interface CatalogStatsResponse {
@@ -1840,15 +1844,33 @@ export function CatalogPage() {
 
   const handleCopyToMine = useCallback(async (resource: CatalogResource) => {
     try {
-      const typePrefix = resource.resource_type.slice(0,3).toUpperCase();
-      const maxNum = items
-        .filter(i => i.source === 'manual' && (i.resource_code ?? '').startsWith(`CAT-${typePrefix}-`))
-        .reduce((max, i) => {
-          const num = parseInt(((i.resource_code ?? '').split('-').pop() ?? '0'), 10);
-          return Number.isFinite(num) && num > max ? num : max;
-        }, 0);
-      copyCounterRef.current += 1;
-      const code = `CAT-${typePrefix}-${String(maxNum + copyCounterRef.current).padStart(6, '0')}`;
+      // Keep our coding scheme when the source already uses it (TT type + CC
+      // category + NNNNNN): the copy in "My Database" stays consistent — same
+      // type+category prefix, with a fresh correlative scoped to CUSTOM so
+      // re-copying the same reference never collides. Legacy regions whose
+      // codes are not 10 digits keep the CAT-{TYPE}-{N} fallback.
+      let code: string;
+      if (/^\d{10}$/.test(resource.resource_code)) {
+        // Ask the backend for the next free correlative of this TT+CC prefix.
+        // Codes are globally unique, so it scans every region reliably (the
+        // client-side scan missed high correlatives in large categories and
+        // collided with the source region's code).
+        const prefix = resource.resource_code.slice(0, 4);
+        const { next_code } = await apiGet<{ next_code: string }>(
+          `/v1/catalog/next-code/?prefix=${prefix}`,
+        );
+        code = next_code;
+      } else {
+        const typePrefix = resource.resource_type.slice(0, 3).toUpperCase();
+        const maxNum = items
+          .filter((i) => i.source === 'manual' && (i.resource_code ?? '').startsWith(`CAT-${typePrefix}-`))
+          .reduce((max, i) => {
+            const num = parseInt(((i.resource_code ?? '').split('-').pop() ?? '0'), 10);
+            return Number.isFinite(num) && num > max ? num : max;
+          }, 0);
+        copyCounterRef.current += 1;
+        code = `CAT-${typePrefix}-${String(maxNum + copyCounterRef.current).padStart(6, '0')}`;
+      }
       await apiPost('/v1/catalog/', {
         resource_code: code,
         name: resource.name,
@@ -3240,6 +3262,37 @@ function ResourceFormModal({
     writeStoredCategoryCodes(next);
     return nextCode;
   }, [categoryCodes]);
+  // Category codes derived server-side from the resources' resource_code
+  // (positions 3-4). Only keep well-formed 2-digit values. This is what lets
+  // an imported region (e.g. PE_LIMA) show every category with its real code
+  // without the user having any localStorage map.
+  const serverCategoryCodes = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const stat of categoryStats?.by_category ?? []) {
+      if (stat.category && stat.code && /^\d{2}$/.test(stat.code)) {
+        map[stat.category] = stat.code;
+      }
+    }
+    return map;
+  }, [categoryStats?.by_category]);
+  // Seed any data-derived codes the user doesn't already have, so the form's
+  // prefix/sequence logic and the combobox stay consistent and persist.
+  useEffect(() => {
+    const entries = Object.entries(serverCategoryCodes);
+    if (entries.length === 0) return;
+    setCategoryCodes((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const [cat, code] of entries) {
+        if (!next[cat]) {
+          next[cat] = code;
+          changed = true;
+        }
+      }
+      if (changed) writeStoredCategoryCodes(next);
+      return changed ? next : prev;
+    });
+  }, [serverCategoryCodes]);
   const categoryOptions = (() => {
     const byName = new Map<string, number>();
     for (const stat of categoryStats?.by_category ?? []) {
@@ -3255,7 +3308,10 @@ function ResourceFormModal({
       .map(([category, count], index) => ({
         category,
         count,
-        code: categoryCodes[category] ?? String(index + 1).padStart(2, '0'),
+        code:
+          categoryCodes[category] ??
+          serverCategoryCodes[category] ??
+          String(index + 1).padStart(2, '0'),
       }))
       .sort((a, b) => a.category.localeCompare(b.category));
   })();
@@ -3514,32 +3570,9 @@ function ResourceFormModal({
         </div>
 
         <div className="px-6 py-4 space-y-3">
-          {resource && (
-            <div className="rounded-lg border border-border-light bg-surface-secondary/50 px-3 py-2">
-              <div className="grid grid-cols-2 gap-3 text-2xs">
-                <div>
-                  <span className="block text-content-quaternary">
-                    {t('catalog.code', { defaultValue: 'Code' })}
-                  </span>
-                  <span className="font-mono text-content-secondary">{resource.resource_code}</span>
-                </div>
-                <div>
-                  <span className="block text-content-quaternary">
-                    {t('catalog.region_label', { defaultValue: 'Region' })}
-                  </span>
-                  <span className="text-content-secondary">{resource.region ?? '—'}</span>
-                </div>
-              </div>
-              <p className="mt-2 text-2xs text-content-tertiary">
-                {t('catalog.identity_locked', {
-                  defaultValue: 'Code and region are locked to preserve existing references.',
-                })}
-              </p>
-            </div>
-          )}
           <div>
             <label className="text-xs font-medium text-content-secondary mb-1 block">
-              Codigo del recurso
+              {t('catalog.resource_code_label', { defaultValue: 'Resource code' })}
             </label>
             <div className="rounded-lg border border-border-light bg-surface-secondary/50 px-3 py-2 text-center">
               <div className="font-mono text-base font-semibold text-content-primary">
@@ -3944,7 +3977,7 @@ function ResourceFormModal({
               />
             </div>
             <div>
-              <label className="text-xs font-medium text-content-secondary mb-1 block">Min Price</label>
+              <label className="text-xs font-medium text-content-secondary mb-1 block">{t('catalog.min_price', { defaultValue: 'Min Price' })}</label>
               <input type="number" step="0.01" value={form.min_price}
                 onChange={(e) => setForm({ ...form, min_price: e.target.value })}
                 placeholder={form.base_price || "0.00"}
@@ -3952,7 +3985,7 @@ function ResourceFormModal({
               />
             </div>
             <div>
-              <label className="text-xs font-medium text-content-secondary mb-1 block">Max Price</label>
+              <label className="text-xs font-medium text-content-secondary mb-1 block">{t('catalog.max_price', { defaultValue: 'Max Price' })}</label>
               <input type="number" step="0.01" value={form.max_price}
                 onChange={(e) => setForm({ ...form, max_price: e.target.value })}
                 placeholder={form.base_price || "0.00"}

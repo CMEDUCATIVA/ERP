@@ -164,6 +164,11 @@ _GITHUB_BASE = "https://raw.githubusercontent.com/datadrivenconstruction/OpenCon
 # downloaded reference data, and a region imported once stays available offline.
 _CATALOG_CACHE_DIR = Path.home() / ".openestimator" / "cache" / "catalog"
 
+# Catalogs we curate in-repo and ship inside the package (e.g. the PE_LIMA
+# CAPECO materials table with our own resource_code scheme). Served before the
+# cache/GitHub fallback so a maintained region needs no network or seeding.
+_BUNDLED_DATA_DIR = Path(__file__).parent / "data"
+
 
 def _read_region_catalog_csv(region: str, folder: str) -> tuple[bytes, str]:
     """Resolve the catalog CSV bytes for one region.
@@ -173,13 +178,23 @@ def _read_region_catalog_csv(region: str, folder: str) -> tuple[bytes, str]:
     locally, so a region imported once stays available without network.
 
     Lookup order:
+      0. Bundled in-repo catalog (a region we curate ourselves).
       1. Local cache dir (a previous successful download).
       2. GitHub download (cached on success for the next offline run).
 
     Runs in a worker thread (blocking I/O). Returns ``(raw_bytes, source)``
-    where ``source`` is ``cache`` / ``github``. Raises ``RuntimeError`` with
-    an actionable message when both fail.
+    where ``source`` is ``bundled`` / ``cache`` / ``github``. Raises
+    ``RuntimeError`` with an actionable message when all fail.
     """
+    # 0. Bundled catalog shipped inside the package (curated in-repo). Wins
+    #    over cache/GitHub so a region we maintain is always served from disk.
+    bundled = _BUNDLED_DATA_DIR / f"{region}_Catalog.csv"
+    try:
+        if bundled.is_file() and bundled.stat().st_size > 100:
+            return bundled.read_bytes(), "bundled"
+    except OSError:
+        logger.warning("Unreadable bundled catalog CSV at %s, ignoring", bundled)
+
     csv_name = f"DDC_CWICR_{region}_Catalog.csv"
 
     # 1. Local cache from a previous download. The 1 KB floor skips a stuck
@@ -594,6 +609,37 @@ async def catalog_stats(
 ) -> CatalogStatsResponse:
     """Get aggregated counts by type and category (optionally per region)."""
     return await service.get_stats(region=region)
+
+
+# ── Next free code for a prefix ───────────────────────────────────────────
+# Declared before ``/{resource_id}`` so the static path is matched first.
+
+
+@router.get("/next-code/")
+async def next_resource_code(
+    prefix: str = Query(
+        ...,
+        min_length=1,
+        max_length=8,
+        description="Code prefix: TT type + CC category, e.g. 0202",
+    ),
+    # Public read (same optional-auth contract as search/stats).
+    _user: OptionalUserPayload = None,
+    service: CatalogResourceService = Depends(_get_service),
+) -> dict[str, str]:
+    """Next free resource code for a prefix in our ``TT+CC+NNNNNN`` scheme.
+
+    Returns ``{"next_code": "<prefix><correlative>"}`` one past the largest
+    existing code with that prefix. Codes are globally unique, so the
+    correlative is computed across all regions - this lets the UI mint a
+    collision-free code when copying a reference resource into My Database.
+    """
+    if not prefix.isdigit():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="prefix must contain digits only",
+        )
+    return {"next_code": await service.next_code_for_prefix(prefix)}
 
 
 # ── Inverse lookup: positions that use a resource ─────────────────────────

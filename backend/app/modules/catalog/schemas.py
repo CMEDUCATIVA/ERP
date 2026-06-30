@@ -302,10 +302,14 @@ class CatalogTypeStat(BaseModel):
 
 
 class CatalogCategoryStat(BaseModel):
-    """Count of resources by category."""
+    """Count of resources by category, with the 2-digit category code
+    derived from the resources' ``resource_code`` (empty when the category
+    has no numeric-coded resources). Lets the UI show/seed category codes
+    from the data instead of browser localStorage."""
 
     category: str
     count: int
+    code: str = ""
 
 
 # ── Category management ───────────────────────────────────────────────────
