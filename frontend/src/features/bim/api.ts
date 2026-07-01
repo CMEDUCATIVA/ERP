@@ -879,6 +879,23 @@ export async function deleteLink(linkId: string): Promise<void> {
   await apiDelete(`/v1/bim_hub/links/${encodeURIComponent(linkId)}`);
 }
 
+export interface ReconcileBoqLinksResult {
+  positions_scanned: number;
+  positions_updated: number;
+  links_created: number;
+  links_deleted: number;
+  mirror_ids_dropped: number;
+}
+
+/** Heal the cad_element_ids mirror ↔ canonical BOQ↔BIM links for a project:
+ *  backfill links for real elements, drop ghosts. Idempotent. */
+export async function reconcileBoqLinks(projectId: string): Promise<ReconcileBoqLinksResult> {
+  return apiPost<ReconcileBoqLinksResult, Record<string, never>>(
+    `/v1/bim_hub/reconcile-boq-links/?project_id=${encodeURIComponent(projectId)}`,
+    {},
+  );
+}
+
 /* ── Quantity Maps (rule-based bulk linking) ───────────────────────────── */
 
 /** Optional target for a quantity-map rule. */

@@ -3973,6 +3973,24 @@ async def create_link(
     return BOQElementLinkResponse.model_validate(link)
 
 
+@router.post("/reconcile-boq-links/")
+async def reconcile_boq_links(
+    project_id: uuid.UUID = Query(...),
+    user_id: CurrentUserId = None,  # type: ignore[assignment]
+    _perm: None = Depends(RequirePermission("bim.create")),
+    service: BIMHubService = Depends(_get_service),
+) -> dict:
+    """Reconcile the cad_element_ids mirror with the canonical BOQ↔BIM links
+    for a project.
+
+    Backfills a canonical link for any mirror id that still resolves to a real
+    element (recovers AI-match / import associations that only wrote the mirror)
+    and drops ghosts (ids/links whose element no longer exists). Idempotent.
+    """
+    await _verify_project_access(service.session, project_id, user_id or "")
+    return await service.reconcile_boq_links(project_id)
+
+
 @router.delete("/links/{link_id}", status_code=204)
 async def delete_link(
     link_id: uuid.UUID,

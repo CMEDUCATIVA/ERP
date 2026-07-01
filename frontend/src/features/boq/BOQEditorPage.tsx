@@ -33,7 +33,7 @@ import {
 import { resourceSplitMoneyTotals } from './grid/columnDefs';
 import { ApiError } from '@/shared/lib/api';
 import { projectsApi, type Project, type ProjectFxRate } from '@/features/projects/api';
-import { fetchBIMModels } from '@/features/bim/api';
+import { fetchBIMModels, reconcileBoqLinks } from '@/features/bim/api';
 // AutocompleteInput used in sub-components, not directly here
 // import { AutocompleteInput } from './AutocompleteInput';
 import { AIChatPanel } from './AIChatPanel';
@@ -208,6 +208,28 @@ export function BOQEditorPage() {
     const ready = models.find((m) => m.status === 'ready' && (m.element_count ?? 0) > 0);
     return ready?.id ?? null;
   }, [bimModelsData]);
+
+  // Auto-heal the cad_element_ids mirror ↔ canonical BOQ↔BIM links once when the
+  // editor opens (only if the project has a BIM model). Idempotent: backfills
+  // real links, drops ghosts; refreshes the grid if anything changed.
+  // Best-effort and non-blocking.
+  const reconciledRef = useRef(false);
+  useEffect(() => {
+    const projectId = boq?.project_id;
+    const hasModel = (bimModelsData?.items?.length ?? 0) > 0;
+    if (!projectId || !hasModel || reconciledRef.current) return;
+    reconciledRef.current = true;
+    reconcileBoqLinks(projectId)
+      .then((stats) => {
+        if (stats.links_created || stats.links_deleted || stats.positions_updated) {
+          queryClient.invalidateQueries({ queryKey: ['boq', boqId] });
+          queryClient.invalidateQueries({ queryKey: ['bim-model-boq-links'] });
+        }
+      })
+      .catch(() => {
+        /* best-effort heal; never block the editor */
+      });
+  }, [boq?.project_id, bimModelsData, boqId, queryClient]);
 
   const currencySymbol = useMemo(() => getCurrencySymbol(project?.currency), [project?.currency]);
   const currencyCode = useMemo(() => getCurrencyCode(project?.currency), [project?.currency]);

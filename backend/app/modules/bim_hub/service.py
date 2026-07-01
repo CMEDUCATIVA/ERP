@@ -2740,6 +2740,105 @@ class BIMHubService:
             "positions_updated": positions_updated,
         }
 
+    async def reconcile_boq_links(self, project_id: uuid.UUID) -> dict:
+        """Heal the ``cad_element_ids`` mirror vs. the canonical
+        ``oe_bim_boq_link`` table for every BOQ position in a project.
+
+        Unlike ``sync_cad_element_ids`` (a plain mirror <- canonical copy that
+        would DROP legitimate AI-match / import associations that only ever
+        wrote the mirror), this reconciles both directions and removes ghosts:
+
+        * mirror id with a real element but NO canonical link  -> backfill the
+          link (recover the association that skipped the link table).
+        * mirror id whose element no longer exists (re-uploaded model)  -> drop
+          it from the mirror.
+        * canonical link whose element no longer exists  -> delete the link.
+
+        Final mirror == element ids that have a canonical link AND resolve to a
+        real element. Element existence is checked in one bulk query.
+        """
+        pos_stmt = select(Position).join(BOQ, BOQ.id == Position.boq_id).where(BOQ.project_id == project_id)
+        positions = list((await self.session.execute(pos_stmt)).scalars().all())
+
+        link_stmt = (
+            select(BOQElementLink)
+            .join(Position, Position.id == BOQElementLink.boq_position_id)
+            .join(BOQ, BOQ.id == Position.boq_id)
+            .where(BOQ.project_id == project_id)
+        )
+        links = list((await self.session.execute(link_stmt)).scalars().all())
+        links_by_pos: dict[uuid.UUID, list[BOQElementLink]] = {}
+        for lnk in links:
+            links_by_pos.setdefault(lnk.boq_position_id, []).append(lnk)
+
+        # Bulk existence: one query for every referenced element id.
+        referenced: set[str] = set()
+        for p in positions:
+            referenced |= {str(x) for x in (p.cad_element_ids or [])}
+        for lnk in links:
+            referenced.add(str(lnk.bim_element_id))
+        valid_uuids: list[uuid.UUID] = []
+        for x in referenced:
+            try:
+                valid_uuids.append(uuid.UUID(x))
+            except (ValueError, TypeError):
+                continue
+        existing: set[str] = set()
+        if valid_uuids:
+            ex_stmt = select(BIMElement.id).where(BIMElement.id.in_(valid_uuids))
+            existing = {str(i) for i in (await self.session.execute(ex_stmt)).scalars().all()}
+
+        stats = {
+            "positions_scanned": 0,
+            "positions_updated": 0,
+            "links_created": 0,
+            "links_deleted": 0,
+            "mirror_ids_dropped": 0,
+        }
+
+        for pos in positions:
+            mirror = [str(x) for x in (pos.cad_element_ids or [])]
+            pos_links = links_by_pos.get(pos.id, [])
+            if not mirror and not pos_links:
+                continue
+            stats["positions_scanned"] += 1
+            canonical_ids = {str(lnk.bim_element_id) for lnk in pos_links}
+            final: set[str] = set()
+
+            # Canonical links: keep if the element still exists, else delete.
+            for lnk in pos_links:
+                eid = str(lnk.bim_element_id)
+                if eid in existing:
+                    final.add(eid)
+                else:
+                    await self.link_repo.delete(lnk.id)
+                    stats["links_deleted"] += 1
+
+            # Mirror-only ids: backfill a link when the element is real; drop ghosts.
+            for eid in set(mirror) - canonical_ids:
+                if eid in existing:
+                    await self.link_repo.create(
+                        BOQElementLink(
+                            boq_position_id=pos.id,
+                            bim_element_id=uuid.UUID(eid),
+                            link_type="auto",
+                            confidence="medium",
+                        )
+                    )
+                    final.add(eid)
+                    stats["links_created"] += 1
+                else:
+                    stats["mirror_ids_dropped"] += 1
+
+            desired = sorted(final)
+            if sorted(mirror) != desired:
+                pos.cad_element_ids = desired
+                stats["positions_updated"] += 1
+
+        await self.session.flush()
+        logger.info("reconcile_boq_links(project=%s): %s", project_id, stats)
+        return stats
+
     @staticmethod
     def _rule_matches_element(rule: BIMQuantityMap, element: BIMElement) -> bool:
         """Check if a quantity map rule matches an element."""
