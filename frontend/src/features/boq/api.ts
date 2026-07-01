@@ -276,6 +276,9 @@ export interface UpdatePositionData {
   /** Issue #127 — set/change the reusable code on an existing position. */
   reference_code?: string | null;
   link_mode?: LinkMode | null;
+  /** Linked BIM element ids (cad mirror). Patched to drop an orphan id that
+   *  no longer has a canonical BIM link. */
+  cad_element_ids?: string[];
 }
 
 /**

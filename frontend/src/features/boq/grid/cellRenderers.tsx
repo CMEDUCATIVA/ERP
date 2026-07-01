@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import type { ICellRendererParams, Column, GridApi } from 'ag-grid-community';
 import type { Position } from '../api';
+import { boqApi } from '../api';
 import {
   ChevronDown,
   ChevronRight,
@@ -1655,21 +1656,31 @@ const BimLinkPopover = forwardRef<
   const [unlinkingOne, setUnlinkingOne] = useState<string | null>(null);
   const handleUnlinkOne = useCallback(
     async (elementId: string) => {
-      const linkId = linkIdByElement.get(elementId);
-      if (!linkId) return;
+      const posId = positionData?.id as string | undefined;
+      if (!posId) return;
       setUnlinkingOne(elementId);
       try {
-        await deleteLink(linkId);
+        const linkId = linkIdByElement.get(elementId);
+        if (linkId) {
+          // Canonical link → delete it (the backend also drops the cad mirror id).
+          await deleteLink(linkId);
+        } else {
+          // Orphan: the id is in cad_element_ids but has no canonical link (e.g.
+          // the model was re-uploaded). Strip it from the position's cad mirror.
+          await boqApi.updatePosition(posId, {
+            cad_element_ids: elementIds.filter((id) => id !== elementId),
+          });
+        }
         qc.invalidateQueries({ queryKey: ['boq'] });
         qc.invalidateQueries({ queryKey: ['bim-model-boq-links'] });
         qc.invalidateQueries({ queryKey: ['bim-link-preview'] });
-        qc.invalidateQueries({ queryKey: ['bim-link-ids', posIdForLinks] });
+        qc.invalidateQueries({ queryKey: ['bim-link-ids', posId] });
         if (elementIds.length <= 1) onClose(); // last one removed → nothing to show
       } finally {
         setUnlinkingOne(null);
       }
     },
-    [linkIdByElement, qc, posIdForLinks, elementIds.length, onClose],
+    [linkIdByElement, qc, positionData, elementIds, onClose],
   );
 
   const handleUseQuantity = useCallback(
@@ -2088,7 +2099,6 @@ const BimLinkPopover = forwardRef<
                 // the header count matches the list.
                 const el = elements.find((e) => e.id === elId);
                 const isSel = selectedElementId === elId;
-                const hasLink = linkIdByElement.has(elId);
                 return (
                   <div
                     key={elId}
@@ -2115,7 +2125,7 @@ const BimLinkPopover = forwardRef<
                           {el ? el.element_type : elId}
                         </div>
                       </div>
-                      {canApply && hasLink && (
+                      {canApply && (
                         <button
                           type="button"
                           onClick={(e) => {
