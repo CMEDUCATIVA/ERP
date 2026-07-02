@@ -1776,7 +1776,28 @@ class BIMHubService:
         boq_position_id: uuid.UUID,
     ) -> list[BOQElementLink]:
         """List all BIM element links for a BOQ position."""
-        return await self.link_repo.list_by_boq_position(boq_position_id)
+        links = await self.link_repo.list_by_boq_position(boq_position_id)
+        # [BIM->BOQ] Diagnose the popover "mixing": log each linked element and
+        # the model it belongs to (or MISSING when the element no longer exists).
+        try:
+            elem_ids = [lnk.bim_element_id for lnk in links]
+            models: dict[str, str] = {}
+            if elem_ids:
+                rows = (
+                    await self.session.execute(
+                        select(BIMElement.id, BIMElement.model_id).where(BIMElement.id.in_(elem_ids))
+                    )
+                ).all()
+                models = {str(i): str(m) for i, m in rows}
+            logger.info(
+                "[BIM->BOQ] links for position %s: %d link(s); element->model: %s",
+                boq_position_id,
+                len(links),
+                {str(lnk.bim_element_id): models.get(str(lnk.bim_element_id), "MISSING") for lnk in links},
+            )
+        except Exception:  # noqa: BLE001 - never break the read on a logging hiccup
+            logger.exception("[BIM->BOQ] link-log failed for position %s", boq_position_id)
+        return links
 
     async def list_links_for_model(
         self,

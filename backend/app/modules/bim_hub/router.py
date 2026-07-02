@@ -3655,6 +3655,18 @@ async def get_elements_by_ids(
     result = await service.session.execute(query)
     elements = list(result.scalars().all())
 
+    # [BIM->BOQ] Diagnose the popover "mixing": if the linked ids belong to a
+    # DIFFERENT model than model_id, this returns fewer (or zero) than requested.
+    logger.info(
+        "[BIM->BOQ] by-ids: model=%s requested=%d parsed_uuids=%d returned=%d req_ids=%s ret_ids=%s",
+        model_id,
+        len(element_ids),
+        len(parsed_uuids),
+        len(elements),
+        [str(x) for x in element_ids[:8]],
+        [str(e.id) for e in elements[:8]],
+    )
+
     return BIMElementListResponse(
         items=[BIMElementResponse.model_validate(e) for e in elements],
         total=len(elements),

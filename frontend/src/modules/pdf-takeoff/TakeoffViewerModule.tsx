@@ -3111,6 +3111,12 @@ export default function TakeoffViewerModule({
           pdf_measurement_id: measurement.serverId ?? measurement.id,
           pdf_document_id: documentId ?? fileName ?? undefined,
           pdf_page: measurement.page,
+          // Provenance value/unit/type so the BOQ source popover can show the
+          // measurement itself (the quantity goes to the position, but the
+          // popover reads the measured number from here).
+          pdf_measurement_value: measurement.value,
+          pdf_measurement_unit: canonicalUnit,
+          pdf_measurement_type: measurement.type,
         },
       });
 
@@ -3209,6 +3215,9 @@ export default function TakeoffViewerModule({
             pdf_measurement_id: measurement.serverId ?? measurement.id,
             pdf_document_id: documentId ?? fileName ?? undefined,
             pdf_page: measurement.page,
+            pdf_measurement_value: measurement.value,
+            pdf_measurement_unit: canonicalUnit,
+            pdf_measurement_type: measurement.type,
           },
         });
       } catch { /* metadata is non-critical */ }
@@ -3405,6 +3414,9 @@ export default function TakeoffViewerModule({
           pdf_measurement_id: m.serverId ?? m.id,
           pdf_document_id: documentId ?? fileName ?? undefined,
           pdf_page: m.page,
+          pdf_measurement_value: m.value,
+          pdf_measurement_unit: normalizeUnit(m.unit),
+          pdf_measurement_type: m.type,
         },
       }));
       const created = await apiPost<Position[]>(

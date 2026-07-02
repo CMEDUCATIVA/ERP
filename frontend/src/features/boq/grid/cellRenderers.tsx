@@ -31,6 +31,7 @@ import {
   Check,
   AlertTriangle,
   Link2,
+  RotateCcw,
 } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import { useQuery, useQueries, useQueryClient } from '@tanstack/react-query';
@@ -46,6 +47,7 @@ import { getResourceTypeBadge } from '@/shared/lib/resourceTypes';
 import { countComments } from '../CommentDrawer';
 import { BIMQuantityPicker } from './BIMQuantityPicker';
 import { useBimPreviewStore } from './useBimPreviewStore';
+import { useSourcePreviewStore } from './useSourcePreviewStore';
 import { MiniGeometryPreview } from '@/shared/ui/MiniGeometryPreview';
 import { fetchBIMElementsByIds, fetchBIMElementProperties, listLinks, deleteLink } from '@/features/bim/api';
 import type { BIMElementData } from '@/shared/ui/BIMViewer/ElementManager';
@@ -1255,13 +1257,11 @@ export function BimLinkCellRenderer(params: ICellRendererParams) {
   const hasDwgLink = !!dwgAnnotationId || !!dwgDrawingId || !!dwgSource;
 
   const openPreview = useBimPreviewStore((s) => s.openPreview);
-  const [showPdfPopover, setShowPdfPopover] = useState(false);
-  const [showDwgPopover, setShowDwgPopover] = useState(false);
+  // PDF/DWG source popover open-state lives in a store (not local useState) so a
+  // single click survives AG-Grid recreating this cell renderer on first focus /
+  // `ag-cell-data-changed`. See useSourcePreviewStore + SourcePreviewHost.
+  const openSource = useSourcePreviewStore((s) => s.openSource);
   const btnRef = useRef<HTMLButtonElement>(null);
-  const pdfBtnRef = useRef<HTMLButtonElement>(null);
-  const dwgBtnRef = useRef<HTMLButtonElement>(null);
-  const [pdfAnchor, setPdfAnchor] = useState<DOMRect | null>(null);
-  const [dwgAnchor, setDwgAnchor] = useState<DOMRect | null>(null);
 
   // The BIM preview open-state lives in useBimPreviewStore (not in this cell
   // renderer's local state) so a single click survives AG-Grid recreating the
@@ -1277,20 +1277,6 @@ export function BimLinkCellRenderer(params: ICellRendererParams) {
       positionData: data as Record<string, unknown>,
     });
   }, [bimLinkIds, ctx, data, openPreview]);
-
-  const navigate = useNavigate();
-
-  const handleOpenPdf = useCallback((e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (pdfBtnRef.current) setPdfAnchor(pdfBtnRef.current.getBoundingClientRect());
-    setShowPdfPopover(true);
-  }, []);
-
-  const handleOpenDwg = useCallback((e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (dwgBtnRef.current) setDwgAnchor(dwgBtnRef.current.getBoundingClientRect());
-    setShowDwgPopover(true);
-  }, []);
 
   /** Build the deep-link URL for the PDF takeoff viewer, focused on the
    *  linked measurement so the user lands on the exact annotation. */
@@ -1310,6 +1296,36 @@ export function BimLinkCellRenderer(params: ICellRendererParams) {
     if (dwgAnnotationId) params.set('focus', dwgAnnotationId);
     return `/dwg-takeoff?${params.toString()}`;
   }, [dwgDrawingId, dwgAnnotationId]);
+
+  // Open on mousedown (not click) + preventDefault, mirroring the BIM chip:
+  // AG-Grid focuses & recreates the cell renderer on the first click, so we open
+  // before that focus re-render. The popover open-state lives in the store
+  // (openSource) so it also survives the recreation — a single click is enough.
+  const handleOpenPdf = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    openSource({
+      kind: 'pdf',
+      sourceName: pdfSource || pdfDocumentId || null,
+      page: pdfPage ?? null,
+      measurementId: pdfMeasurementId ?? null,
+      positionData: data as Record<string, unknown>,
+      deepLink: pdfDeepLink,
+    });
+  }, [openSource, pdfSource, pdfDocumentId, pdfPage, pdfMeasurementId, data, pdfDeepLink]);
+
+  const handleOpenDwg = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    openSource({
+      kind: 'dwg',
+      sourceName: dwgSource || null,
+      drawingId: dwgDrawingId ?? null,
+      annotationId: dwgAnnotationId ?? null,
+      positionData: data as Record<string, unknown>,
+      deepLink: dwgDeepLink,
+    });
+  }, [openSource, dwgSource, dwgDrawingId, dwgAnnotationId, data, dwgDeepLink]);
 
   if (!hasBimLink && !hasPdfLink && !hasDwgLink) return null;
 
@@ -1338,9 +1354,7 @@ export function BimLinkCellRenderer(params: ICellRendererParams) {
       )}
       {hasPdfLink && (
         <button
-          ref={pdfBtnRef}
-          onClick={handleOpenPdf}
-          onMouseDown={(e) => e.stopPropagation()}
+          onMouseDown={handleOpenPdf}
           className="h-6 w-6 inline-flex items-center justify-center rounded
                      bg-rose-500/10 text-rose-600 dark:text-rose-400
                      hover:bg-rose-500/25 transition-colors cursor-pointer"
@@ -1354,9 +1368,7 @@ export function BimLinkCellRenderer(params: ICellRendererParams) {
       )}
       {hasDwgLink && (
         <button
-          ref={dwgBtnRef}
-          onClick={handleOpenDwg}
-          onMouseDown={(e) => e.stopPropagation()}
+          onMouseDown={handleOpenDwg}
           className="h-6 w-6 inline-flex items-center justify-center rounded
                      bg-amber-500/10 text-amber-600 dark:text-amber-400
                      hover:bg-amber-500/25 transition-colors cursor-pointer"
@@ -1368,61 +1380,55 @@ export function BimLinkCellRenderer(params: ICellRendererParams) {
           <FileBox size={12} />
         </button>
       )}
-
-      {/* PDF source info popover */}
-      {showPdfPopover && pdfAnchor &&
-        createPortal(
-          <>
-            <div
-              className="fixed inset-0 bg-black/20 backdrop-blur-[2px] z-[9998] animate-fade-in"
-              onClick={() => setShowPdfPopover(false)}
-            />
-            <PdfDwgSourcePopover
-              kind="pdf"
-              anchor={pdfAnchor}
-              sourceName={pdfSource || pdfDocumentId || null}
-              page={pdfPage ?? null}
-              measurementId={pdfMeasurementId ?? null}
-              positionData={data as Record<string, unknown>}
-              deepLink={pdfDeepLink}
-              onClose={() => setShowPdfPopover(false)}
-              onNavigate={() => {
-                setShowPdfPopover(false);
-                navigate(pdfDeepLink);
-              }}
-              onApplyQuantity={ctx?.onUpdatePosition}
-            />
-          </>,
-          document.body,
-        )}
-
-      {/* DWG source info popover */}
-      {showDwgPopover && dwgAnchor &&
-        createPortal(
-          <>
-            <div
-              className="fixed inset-0 bg-black/20 backdrop-blur-[2px] z-[9998] animate-fade-in"
-              onClick={() => setShowDwgPopover(false)}
-            />
-            <PdfDwgSourcePopover
-              kind="dwg"
-              anchor={dwgAnchor}
-              sourceName={dwgSource || null}
-              drawingId={dwgDrawingId ?? null}
-              annotationId={dwgAnnotationId ?? null}
-              positionData={data as Record<string, unknown>}
-              deepLink={dwgDeepLink}
-              onClose={() => setShowDwgPopover(false)}
-              onNavigate={() => {
-                setShowDwgPopover(false);
-                navigate(dwgDeepLink);
-              }}
-              onApplyQuantity={ctx?.onUpdatePosition}
-            />
-          </>,
-          document.body,
-        )}
+      {/* The PDF/DWG source popover itself is rendered once at the grid level by
+          SourcePreviewHost (open-state in useSourcePreviewStore), so it survives
+          AG-Grid recreating this cell renderer on first focus. */}
     </div>
+  );
+}
+
+/* ── SourcePreviewHost — renders the single, grid-level PDF/DWG source popover ──
+   Mounted once by BOQGrid (outside AG-Grid), it reads the open payload from
+   useSourcePreviewStore so the popover survives AG-Grid recreating the cell
+   renderer. This is what makes the PDF/DWG button open on a SINGLE click. ── */
+export function SourcePreviewHost({
+  onUpdatePosition,
+}: {
+  onUpdatePosition?: (
+    id: string,
+    data: Record<string, unknown>,
+    oldData: Record<string, unknown>,
+  ) => void;
+}) {
+  const open = useSourcePreviewStore((s) => s.open);
+  const closeSource = useSourcePreviewStore((s) => s.closeSource);
+  const navigate = useNavigate();
+
+  if (!open) return null;
+
+  return createPortal(
+    <>
+      <div
+        className="fixed inset-0 bg-black/20 backdrop-blur-[2px] z-[9998] animate-fade-in"
+        onClick={closeSource}
+      />
+      <PdfDwgSourcePopover
+        kind={open.kind}
+        sourceName={open.sourceName}
+        page={open.page}
+        measurementId={open.measurementId}
+        drawingId={open.drawingId}
+        annotationId={open.annotationId}
+        positionData={open.positionData}
+        onClose={closeSource}
+        onNavigate={() => {
+          closeSource();
+          navigate(open.deepLink);
+        }}
+        onApplyQuantity={onUpdatePosition}
+      />
+    </>,
+    document.body,
   );
 }
 
@@ -1461,6 +1467,7 @@ export function BimLinkPreviewHost({
         onClick={closePreview}
       />
       <BimLinkPopover
+        key={open.rowId}
         modelId={bimModelId}
         elementIds={elementIds}
         style={style}
@@ -1639,6 +1646,19 @@ const BimLinkPopover = forwardRef<
   // preview (below) and enables its own unlink. null = show all elements.
   const [selectedElementId, setSelectedElementId] = useState<string | null>(null);
 
+  // When an element is focused, the data panels (Properties + Apply-to-BOQ)
+  // narrow to just that element so its numbers can be read and applied on their
+  // own. null selection = the aggregate view across every linked element.
+  const focusedElements = useMemo(
+    () => (selectedElementId ? elements.filter((e) => e.id === selectedElementId) : elements),
+    [elements, selectedElementId],
+  );
+  const selectedElementName = useMemo(() => {
+    if (!selectedElementId) return null;
+    const el = elements.find((e) => e.id === selectedElementId);
+    return el?.name || el?.element_type || selectedElementId;
+  }, [elements, selectedElementId]);
+
   // element_id -> link_id map for per-element unlink (the aggregated preview
   // only carries element ids). Fetched once per position.
   const posIdForLinks = (positionData?.id as string | undefined) ?? null;
@@ -1654,6 +1674,10 @@ const BimLinkPopover = forwardRef<
     return m;
   }, [linkIdsQuery.data]);
   const [unlinkingOne, setUnlinkingOne] = useState<string | null>(null);
+  // Ids removed within THIS open popover. Its `elementIds` prop is a frozen
+  // snapshot taken when the popover opened, so after an unlink we hide the row
+  // locally (and close when nothing is left) instead of leaving stale rows.
+  const [removedIds, setRemovedIds] = useState<Set<string>>(() => new Set());
   const handleUnlinkOne = useCallback(
     async (elementId: string) => {
       const posId = positionData?.id as string | undefined;
@@ -1675,12 +1699,25 @@ const BimLinkPopover = forwardRef<
         qc.invalidateQueries({ queryKey: ['bim-model-boq-links'] });
         qc.invalidateQueries({ queryKey: ['bim-link-preview'] });
         qc.invalidateQueries({ queryKey: ['bim-link-ids', posId] });
-        if (elementIds.length <= 1) onClose(); // last one removed → nothing to show
+        if (selectedElementId === elementId) setSelectedElementId(null);
+        // Hide this row in the open popover; close when none remain.
+        setRemovedIds((prev) => {
+          const next = new Set(prev);
+          next.add(elementId);
+          if (elementIds.every((id) => next.has(id))) onClose();
+          return next;
+        });
       } finally {
         setUnlinkingOne(null);
       }
     },
-    [linkIdByElement, qc, positionData, elementIds, onClose],
+    [linkIdByElement, qc, positionData, elementIds, onClose, selectedElementId],
+  );
+
+  // Ids still shown (snapshot minus locally-removed).
+  const visibleElementIds = useMemo(
+    () => elementIds.filter((id) => !removedIds.has(id)),
+    [elementIds, removedIds],
   );
 
   const handleUseQuantity = useCallback(
@@ -1710,7 +1747,7 @@ const BimLinkPopover = forwardRef<
   // We classify each key with a keyword heuristic. Unknown → DISTINCT (safer
   // default: showing "N unique values" never lies; an unwarranted sum might).
   const quantitySums = useMemo(() => {
-    if (elements.length === 0) {
+    if (focusedElements.length === 0) {
       return [] as {
         key: string;
         label: string;
@@ -1793,7 +1830,7 @@ const BimLinkPopover = forwardRef<
         });
       }
     };
-    for (const el of elements) {
+    for (const el of focusedElements) {
       const dbKeys = new Set<string>();
       if (el.quantities) {
         for (const [k, v] of Object.entries(el.quantities)) {
@@ -1832,7 +1869,7 @@ const BimLinkPopover = forwardRef<
       if (a.agg === 'sum') return b.sum - a.sum;
       return b.uniqueValues.length - a.uniqueValues.length;
     });
-  }, [elements, parquetByElementId, showAllSums]);
+  }, [focusedElements, parquetByElementId, showAllSums]);
 
   return (
     <div
@@ -1850,26 +1887,52 @@ const BimLinkPopover = forwardRef<
           <span className="text-xs font-semibold text-content-primary">
             {t('boq.linked_geometry', { defaultValue: 'Linked Geometry' })}
           </span>
-          <span className="text-[10px] text-content-tertiary tabular-nums">
-            ({t('boq.element_count', { defaultValue: '{{count}} element(s)', count: elementIds.length })})
+          <span className="text-[10px] text-content-tertiary tabular-nums truncate max-w-[220px]">
+            {selectedElementId
+              ? t('boq.element_focused', {
+                  defaultValue: '{{index}} of {{total}} · {{name}}',
+                  index: Math.max(visibleElementIds.indexOf(selectedElementId) + 1, 1),
+                  total: visibleElementIds.length,
+                  name: selectedElementName,
+                })
+              : `(${t('boq.element_count', { defaultValue: '{{count}} element(s)', count: visibleElementIds.length })})`}
           </span>
         </div>
         <div className="flex items-center gap-1">
-          {canApply && elementIds.length > 0 && (
+          {/* When an element is focused, its own "Restablecer" (reset to the
+              aggregate view) takes the primary slot; "Unlink all" is only
+              relevant on the full set, so we show one or the other. */}
+          {selectedElementId ? (
             <button
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
-                handleUnlinkAll();
+                setSelectedElementId(null);
               }}
-              disabled={unlinkingAll}
               className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold
-                         text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-colors disabled:opacity-50"
-              title={t('boq.unlink_all_title', { defaultValue: 'Unlink all BIM elements from this BOQ item' })}
+                         text-oe-blue hover:bg-oe-blue/10 transition-colors"
+              title={t('boq.reset_selection_title', { defaultValue: 'Show data for all linked elements again' })}
             >
-              <Link2Off size={11} />
-              {t('boq.unlink_all', { defaultValue: 'Unlink all' })}
+              <RotateCcw size={11} />
+              {t('boq.reset_selection', { defaultValue: 'Reset' })}
             </button>
+          ) : (
+            canApply && visibleElementIds.length > 0 && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleUnlinkAll();
+                }}
+                disabled={unlinkingAll}
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold
+                           text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-colors disabled:opacity-50"
+                title={t('boq.unlink_all_title', { defaultValue: 'Unlink all BIM elements from this BOQ item' })}
+              >
+                <Link2Off size={11} />
+                {t('boq.unlink_all', { defaultValue: 'Unlink all' })}
+              </button>
+            )
           )}
           <button
             type="button"
@@ -1938,12 +2001,12 @@ const BimLinkPopover = forwardRef<
                   <Loader2 size={12} className="animate-spin text-content-tertiary" />
                 </div>
               )}
-              {!isLoading && elements.map((el) => {
+              {!isLoading && focusedElements.map((el) => {
                 const numericEntries = extractNumerics(el, showAllProps);
                 if (numericEntries.length === 0) return null;
                 return (
                   <div key={el.id} className="px-3 py-1.5 border-b border-border-light/30 dark:border-border-dark/30 last:border-b-0">
-                    {elements.length > 1 && (
+                    {focusedElements.length > 1 && (
                       <div className="text-[9px] font-medium text-content-tertiary mb-0.5 truncate">{el.name || el.element_type}</div>
                     )}
                     {numericEntries.map(({ key, value, source }) => {
@@ -2010,7 +2073,7 @@ const BimLinkPopover = forwardRef<
                   </div>
                 );
               })}
-              {!isLoading && !isEnriching && elements.every((el) => extractNumerics(el, showAllProps).length === 0) && (
+              {!isLoading && !isEnriching && focusedElements.every((el) => extractNumerics(el, showAllProps).length === 0) && (
                 <div className="py-3 text-center text-[10px] text-content-tertiary">
                   {!showAllProps
                     ? t('boq.no_quantities_hint_button', { defaultValue: 'No quantities - press "Show all" above to surface every BIM property' })
@@ -2040,7 +2103,7 @@ const BimLinkPopover = forwardRef<
           {glbOk ? (
             <MiniGeometryPreview
               modelId={modelId}
-              elementIds={selectedElementId ? [selectedElementId] : elementIds}
+              elementIds={selectedElementId ? [selectedElementId] : visibleElementIds}
               width={380}
               height={220}
               className="bg-gray-50 dark:bg-gray-900 border-b border-border-light dark:border-border-dark"
@@ -2092,7 +2155,7 @@ const BimLinkPopover = forwardRef<
               </div>
             )}
             {!isLoading &&
-              elementIds.map((elId) => {
+              visibleElementIds.map((elId) => {
                 // Map over every LINKED id (not just the resolved elements) so an
                 // orphan link — an id that no longer exists in the model (e.g. the
                 // IFC was re-uploaded) — still shows here with its own unlink, and
@@ -2102,7 +2165,11 @@ const BimLinkPopover = forwardRef<
                 return (
                   <div
                     key={elId}
-                    onClick={() => setSelectedElementId(isSel ? null : elId)}
+                    // Idempotent select: clicking (or double-clicking) an element
+                    // always focuses it — never toggles back to the aggregate view.
+                    // A double-click used to fire select→deselect and read as a
+                    // spurious reset. Use the header "Reset" button to clear focus.
+                    onClick={() => setSelectedElementId(elId)}
                     title={t('boq.focus_element_3d', { defaultValue: 'Click to focus this element in 3D' })}
                     className={`group/elrow px-3 py-2 border-b border-border-light/50 dark:border-border-dark/50 last:border-b-0 cursor-pointer transition-colors ${
                       isSel
@@ -2227,7 +2294,7 @@ const BimLinkPopover = forwardRef<
                         <div className="flex items-baseline gap-1">
                           <span className="text-[12px] tabular-nums text-content-primary font-semibold">{fmt}</span>
                           {s.unit && <span className="text-[9px] text-content-quaternary font-mono">{s.unit}</span>}
-                          {elements.length > 1 && s.count > 1 && (
+                          {focusedElements.length > 1 && s.count > 1 && (
                             <span className="text-[8px] text-content-quaternary">({s.count} el.)</span>
                           )}
                         </div>
@@ -2355,14 +2422,12 @@ const BimLinkPopover = forwardRef<
  * doubles as a "set quantity from source" affordance. */
 interface PdfDwgSourcePopoverProps {
   kind: 'pdf' | 'dwg';
-  anchor: DOMRect;
   sourceName: string | null;
   page?: number | null;
   measurementId?: string | null;
   drawingId?: string | null;
   annotationId?: string | null;
   positionData: Record<string, unknown> | null;
-  deepLink: string;
   onClose: () => void;
   onNavigate: () => void;
   onApplyQuantity?: (id: string, data: Record<string, unknown>, oldData: Record<string, unknown>) => void;
@@ -2371,7 +2436,6 @@ interface PdfDwgSourcePopoverProps {
 function PdfDwgSourcePopover(props: PdfDwgSourcePopoverProps) {
   const {
     kind,
-    anchor,
     sourceName,
     page,
     measurementId,
@@ -2398,12 +2462,22 @@ function PdfDwgSourcePopover(props: PdfDwgSourcePopoverProps) {
     }
     return null;
   };
-  const measurementValue =
+  const metaMeasurementValue =
     kind === 'pdf'
       ? numericFromMeta(['pdf_measurement_value', 'pdf_area', 'pdf_length'])
       : numericFromMeta(['dwg_measurement_value', 'dwg_area', 'dwg_length']);
+  // Fallback for links created before the value was stamped into metadata:
+  // a takeoff-linked position's quantity IS the measured number, so show it
+  // rather than the "not stored locally" placeholder.
+  const posQuantity =
+    typeof positionData?.quantity === 'number'
+      ? (positionData.quantity as number)
+      : parseFloat(String(positionData?.quantity ?? ''));
+  const measurementValue =
+    metaMeasurementValue ?? (Number.isFinite(posQuantity) && posQuantity !== 0 ? posQuantity : null);
   const measurementUnit = (meta[kind === 'pdf' ? 'pdf_measurement_unit' : 'dwg_measurement_unit'] as string | undefined)
     ?? (meta[kind === 'pdf' ? 'pdf_unit' : 'dwg_unit'] as string | undefined)
+    ?? (metaMeasurementValue === null ? (positionData?.unit as string | undefined) : undefined)
     ?? '';
   const measurementType = (meta[kind === 'pdf' ? 'pdf_measurement_type' : 'dwg_annotation_type'] as string | undefined) ?? null;
 
@@ -2423,11 +2497,39 @@ function PdfDwgSourcePopover(props: PdfDwgSourcePopoverProps) {
   }, [onClose]);
 
   const width = 320;
-  const left = Math.min(anchor.right + 8, window.innerWidth - width - 8);
-  const top = Math.max(8, Math.min(anchor.top, window.innerHeight - 240));
 
   const canApply =
     !!positionData?.id && !!onApplyQuantity && measurementValue !== null;
+
+  // Whether the measurement already equals the position quantity. When it does,
+  // "Set as quantity" is a no-op — the position was already filled from this
+  // takeoff (pushQuantity at link time), so we show a disabled "current" state
+  // instead of a button that silently does nothing (the "no cambia nada" case).
+  const isCurrentQty =
+    measurementValue !== null &&
+    Number.isFinite(posQuantity) &&
+    Math.abs(measurementValue - posQuantity) < 0.001;
+
+  // Unlink is available whenever we can edit the position, even when no
+  // measurement value is stored locally (the link lives entirely in the
+  // position metadata under `pdf_*` / `dwg_*` keys).
+  const canUnlink = !!positionData?.id && !!onApplyQuantity;
+
+  const handleUnlink = () => {
+    if (!canUnlink) return;
+    const id = positionData!.id as string;
+    const prefix = kind === 'pdf' ? 'pdf_' : 'dwg_';
+    // Strip every provenance key for this source kind so the takeoff chip
+    // disappears. The quantity itself is kept — unlinking removes the link,
+    // not the number the user already committed.
+    const newMeta: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(meta)) {
+      if (k.startsWith(prefix)) continue;
+      newMeta[k] = v;
+    }
+    onApplyQuantity!(id, { metadata: newMeta }, { ...positionData });
+    onClose();
+  };
 
   const applyQuantity = () => {
     if (!canApply || measurementValue === null) return;
@@ -2463,10 +2565,21 @@ function PdfDwgSourcePopover(props: PdfDwgSourcePopoverProps) {
     ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400'
     : 'bg-amber-500/10 text-amber-600 dark:text-amber-400';
 
+  // Centered near the top of the viewport. The caller already wraps this in a
+  // portal + dimmed backdrop, so we only position the dialog here — adding our
+  // own portal/backdrop stacked a second overlay that swallowed clicks and made
+  // the popover "just disappear" on press.
   return (
     <div
       ref={popRef}
-      style={{ position: 'fixed', left, top, width, zIndex: 9999 }}
+      style={{
+        position: 'fixed',
+        left: '50%',
+        top: 72,
+        transform: 'translateX(-50%)',
+        width,
+        zIndex: 9999,
+      }}
       className="rounded-xl shadow-2xl border border-border-light dark:border-border-dark
                  bg-white dark:bg-surface-elevated overflow-hidden animate-card-in"
       onClick={(e) => e.stopPropagation()}
@@ -2559,27 +2672,52 @@ function PdfDwgSourcePopover(props: PdfDwgSourcePopoverProps) {
       </div>
 
       {/* Footer actions */}
-      <div className="px-3.5 py-2.5 border-t border-border-light dark:border-border-dark bg-surface-secondary/20 flex items-center gap-2">
+      <div className="px-3.5 py-2.5 border-t border-border-light dark:border-border-dark bg-surface-secondary/20 space-y-2">
         {canApply && (
+          isCurrentQty ? (
+            <div
+              className="w-full h-8 flex items-center justify-center gap-1.5 rounded-md text-[11px] font-semibold
+                         text-emerald-700 dark:text-emerald-300 bg-emerald-500/10 cursor-default"
+              title={t('boq.source_apply_qty_current_title', { defaultValue: 'The position quantity already matches this measurement' })}
+            >
+              <CheckCircle2 size={12} />
+              {t('boq.source_apply_qty_current', { defaultValue: 'Already the position quantity' })}
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={applyQuantity}
+              className={`w-full h-8 flex items-center justify-center gap-1.5 rounded-md text-[11px] font-semibold text-white bg-gradient-to-r ${accent} ring-1 shadow-sm hover:shadow-md active:scale-[0.98] transition-all`}
+              title={t('boq.source_apply_qty_title', { defaultValue: 'Set this value as the BOQ position quantity' })}
+            >
+              <ArrowRight size={12} />
+              {t('boq.source_apply_qty', { defaultValue: 'Set as quantity' })}
+            </button>
+          )
+        )}
+        <div className="flex items-center gap-2">
+          {canUnlink && (
+            <button
+              type="button"
+              onClick={handleUnlink}
+              className="flex-1 h-8 flex items-center justify-center gap-1.5 rounded-md text-[11px] font-semibold
+                         text-rose-600 dark:text-rose-400 bg-rose-500/10 hover:bg-rose-500/20 transition-colors"
+              title={t('boq.source_unlink_title', { defaultValue: 'Remove this takeoff link from the BOQ item (keeps the quantity)' })}
+            >
+              <Link2Off size={12} />
+              {t('boq.source_unlink', { defaultValue: 'Unlink' })}
+            </button>
+          )}
           <button
             type="button"
-            onClick={applyQuantity}
-            className={`flex-1 h-8 flex items-center justify-center gap-1.5 rounded-md text-[11px] font-semibold text-white bg-gradient-to-r ${accent} ring-1 shadow-sm hover:shadow-md active:scale-[0.98] transition-all`}
-            title={t('boq.source_apply_qty_title', { defaultValue: 'Set this value as the BOQ position quantity' })}
+            onClick={onNavigate}
+            className="flex-1 h-8 flex items-center justify-center gap-1.5 rounded-md text-[11px] font-semibold text-oe-blue bg-oe-blue/10 hover:bg-oe-blue/20 transition-colors"
+            title={t('boq.source_open_title', { defaultValue: 'Open the source document in its viewer, focused on this item' })}
           >
-            <ArrowRight size={12} />
-            {t('boq.source_apply_qty', { defaultValue: 'Set as quantity' })}
+            <ExternalLink size={12} />
+            {t('boq.source_open', { defaultValue: 'Open source' })}
           </button>
-        )}
-        <button
-          type="button"
-          onClick={onNavigate}
-          className={`${canApply ? 'h-8 px-3' : 'flex-1 h-8'} flex items-center justify-center gap-1.5 rounded-md text-[11px] font-semibold text-oe-blue bg-oe-blue/10 hover:bg-oe-blue/20 transition-colors`}
-          title={t('boq.source_open_title', { defaultValue: 'Open the source document in its viewer, focused on this item' })}
-        >
-          <ExternalLink size={12} />
-          {t('boq.source_open', { defaultValue: 'Open source' })}
-        </button>
+        </div>
       </div>
     </div>
   );

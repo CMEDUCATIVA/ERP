@@ -80,6 +80,7 @@ import {
   BimQtyPickerCellRenderer,
   DescriptionCellRenderer,
   BimLinkPreviewHost,
+  SourcePreviewHost,
   type ContextMenuTarget,
   type FullGridContext,
 } from './grid/cellRenderers';
@@ -2592,6 +2593,10 @@ const BOQGrid = forwardRef<BOQGridHandle, BOQGridProps>(function BOQGrid({
         bimModelId={gridContext.bimModelId}
         onUpdatePosition={gridContext.onUpdatePosition}
       />
+      {/* Single grid-level PDF/DWG source popover — open-state in
+          useSourcePreviewStore so the cell button opens it on ONE click even
+          when AG-Grid recreates the cell renderer on focus/data-change. */}
+      <SourcePreviewHost onUpdatePosition={gridContext.onUpdatePosition} />
       <div
         className={`ag-theme-quartz ${
           // Shrink header text when many columns are visible so labels

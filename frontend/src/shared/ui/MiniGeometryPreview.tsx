@@ -134,7 +134,6 @@ export function MiniGeometryPreview({
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
   const rafRef = useRef<number>(0);
-  const mountedRef = useRef(true);
   const loadingRef = useRef(true);
   const errorRef = useRef(false);
 
@@ -154,7 +153,14 @@ export function MiniGeometryPreview({
   }, []);
 
   useEffect(() => {
-    mountedRef.current = true;
+    // Per-run cancellation flag. A component-shared ref (the old `mountedRef`)
+    // was wrong here: when `elementIds` changes the effect re-runs, and resetting
+    // a shared ref back to `true` let a SUPERSEDED run's async callbacks and its
+    // requestAnimationFrame loop pass their guard and keep rendering onto the
+    // shared canvas — the intermittent "sometimes the linked element, sometimes
+    // all of them" bug. A local flag captured by THIS run's closure is only ever
+    // flipped by THIS run's cleanup, so a superseded run stops for good.
+    let cancelled = false;
     loadingRef.current = true;
     errorRef.current = false;
 
@@ -220,7 +226,7 @@ export function MiniGeometryPreview({
 
     Promise.all([loadModelScene(modelId), resolveMatchSet()])
       .then(([group, matchSet]) => {
-        if (!mountedRef.current) return;
+        if (cancelled) return;
 
         // Traverse: show meshes matching any known ID (db uuid, stable_id, mesh_ref)
         const visibleBox = new THREE.Box3();
@@ -316,7 +322,7 @@ export function MiniGeometryPreview({
 
         // Animation loop — OrbitControls drives camera
         const animate = () => {
-          if (!mountedRef.current) return;
+          if (cancelled) return;
           controls.update();
           renderer.render(scene, camera);
           rafRef.current = requestAnimationFrame(animate);
@@ -324,14 +330,14 @@ export function MiniGeometryPreview({
         animate();
       })
       .catch(() => {
-        if (!mountedRef.current) return;
+        if (cancelled) return;
         errorRef.current = true;
         loadingRef.current = false;
         onError?.();
       });
 
     return () => {
-      mountedRef.current = false;
+      cancelled = true;
       dispose();
     };
   }, [modelId, elementIds.join(','), width, height, dispose]);
