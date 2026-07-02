@@ -4045,6 +4045,12 @@ async def export_boq_pdf(
     if owner is not None:
         prepared_by = owner.full_name or owner.email
 
+    # Report language: project locale wins (the PDF is a project document),
+    # then the owner's locale; unsupported codes fall back to Spanish inside
+    # pdf_export. This makes the export Spanish by default on this deployment
+    # while still honouring an explicit "en" locale.
+    lang = (getattr(project, "locale", "") or getattr(owner, "locale", "") or "es")
+
     try:
         position_count = count_boq_positions(boq_data)
 
@@ -4064,6 +4070,7 @@ async def export_boq_pdf(
                 project_name=project.name,
                 currency=(project.currency or "").strip(),
                 prepared_by=prepared_by,
+                lang=lang,
             )
         else:
             pdf_bytes = generate_boq_pdf(
@@ -4071,6 +4078,7 @@ async def export_boq_pdf(
                 project_name=project.name,
                 currency=(project.currency or "").strip(),
                 prepared_by=prepared_by,
+                lang=lang,
             )
     except Exception:
         _log.exception("PDF generation failed for BOQ %s", boq_id)

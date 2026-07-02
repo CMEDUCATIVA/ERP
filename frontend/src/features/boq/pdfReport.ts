@@ -77,16 +77,19 @@ export function buildSectionGroups(positions: Position[]): {
   };
 }
 
-/** Format a number with currency symbol and locale-aware separators. */
+/** Format a number with currency symbol and locale-aware separators.
+ *  The symbol always goes BEFORE the amount (e.g. "S/ 1,234.56", "€ 1.234,56"). */
 function formatCurrency(value: number, currency: string, locale: string): string {
+  const glue = (n: string) => (currency ? `${currency} ${n}` : n);
   try {
-    const formatted = new Intl.NumberFormat(locale, {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(value);
-    return `${currency}${formatted}`;
+    return glue(
+      new Intl.NumberFormat(locale, {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      }).format(value),
+    );
   } catch {
-    return `${currency}${value.toFixed(2)}`;
+    return glue(value.toFixed(2));
   }
 }
 
@@ -113,6 +116,90 @@ function formatDate(dateInput: string | undefined, locale: string): string {
   }
 }
 
+/* ── Localised labels ───────────────────────────────────────────────────── */
+// This client-side (jsPDF) report is what the UI uses for normal-sized BOQs;
+// the server-side ReportLab report (localised separately) only runs for very
+// large BOQs. Both must speak the same language. Default is Spanish; an
+// explicit "en" locale renders English. Unknown languages fall back to Spanish.
+
+type PdfLang = 'es' | 'en';
+
+function pickPdfLang(locale?: string): PdfLang {
+  const code = (locale ?? 'es').replace('_', '-').split('-')[0]?.toLowerCase();
+  return code === 'en' ? 'en' : 'es';
+}
+
+const PDF_LABELS: Record<PdfLang, Record<string, string>> = {
+  es: {
+    date: 'Fecha',
+    sections: 'Capítulos',
+    positions: 'Partidas',
+    resources: 'Recursos',
+    directCost: 'Coste directo',
+    markups: 'Márgenes',
+    none: 'Ninguno',
+    netTotal: 'Total neto',
+    vat: 'IVA',
+    grossTotal: 'Importe total',
+    grossTotalUpper: 'IMPORTE TOTAL',
+    preparedBy: 'Preparado por:',
+    approvedBy: 'Aprobado por:',
+    signatureLine: 'Nombre / Firma / Fecha',
+    toc: 'Índice',
+    page: 'Página',
+    of: 'de',
+    billOfQuantities: 'Presupuesto',
+    colNo: 'Nº',
+    colDescription: 'Descripción',
+    colUnit: 'Ud.',
+    colQty: 'Cant.',
+    colUnitRate: 'Precio unit.',
+    colTotal: 'Total',
+    sectionSubtotal: 'Subtotal capítulo:',
+    ungroupedItems: 'Partidas sin agrupar',
+    costSummary: 'Resumen de costes',
+    colSection: 'Capítulo',
+    colSubtotal: 'Subtotal',
+    colItem: 'Concepto',
+    colAmount: 'Importe',
+    boqReport: 'Informe de presupuesto',
+  },
+  en: {
+    date: 'Date',
+    sections: 'Sections',
+    positions: 'Positions',
+    resources: 'Resources',
+    directCost: 'Direct Cost',
+    markups: 'Markups',
+    none: 'None',
+    netTotal: 'Net Total',
+    vat: 'VAT',
+    grossTotal: 'Gross Total',
+    grossTotalUpper: 'GROSS TOTAL',
+    preparedBy: 'Prepared by:',
+    approvedBy: 'Approved by:',
+    signatureLine: 'Name / Signature / Date',
+    toc: 'Table of Contents',
+    page: 'Page',
+    of: 'of',
+    billOfQuantities: 'Bill of Quantities',
+    colNo: 'No.',
+    colDescription: 'Description',
+    colUnit: 'Unit',
+    colQty: 'Qty',
+    colUnitRate: 'Unit Rate',
+    colTotal: 'Total',
+    sectionSubtotal: 'Section Subtotal:',
+    ungroupedItems: 'Ungrouped Items',
+    costSummary: 'Cost Summary',
+    colSection: 'Section',
+    colSubtotal: 'Subtotal',
+    colItem: 'Item',
+    colAmount: 'Amount',
+    boqReport: 'BOQ Report',
+  },
+};
+
 /* ── Brand colours ──────────────────────────────────────────────────────── */
 
 const BRAND_DARK = [15, 23, 42] as [number, number, number];     // slate-900
@@ -120,6 +207,19 @@ const BRAND_MID = [71, 85, 105] as [number, number, number];     // slate-600
 const BRAND_LIGHT = [226, 232, 240] as [number, number, number]; // slate-200
 const BRAND_ACCENT = [99, 102, 241] as [number, number, number]; // indigo-500
 const WHITE = [255, 255, 255] as [number, number, number];
+
+/* ── Shared table styling ───────────────────────────────────────────────── */
+// Generous inner padding + vertical centering so text is never glued to the
+// cell borders, plus a minimum row height for breathing room. Reused by every
+// autoTable in the report so tables look consistent and professional.
+const TABLE_STYLES: NonNullable<Parameters<typeof autoTable>[1]>['styles'] = {
+  cellPadding: { top: 2.2, right: 3, bottom: 2.2, left: 3 },
+  valign: 'middle',
+  minCellHeight: 7,
+  lineColor: BRAND_LIGHT,
+  lineWidth: 0.15,
+  overflow: 'linebreak',
+};
 
 /* ── Cover page ─────────────────────────────────────────────────────────── */
 
@@ -130,34 +230,42 @@ function renderCoverPage(
 ): void {
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
+  const L = PDF_LABELS[pickPdfLang(locale)];
 
-  // Background header block
+  const labelX = 20;                 // left margin (also used by signature block)
+  const rightX = pageW - labelX;     // right margin — values align here
+
+  // ── Header band (height adapts to how many lines the title wraps to) ──
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(24);
+  const titleLines = doc.splitTextToSize(options.boqTitle || '', pageW - labelX * 2) as string[];
+  const titleLineH = 9;              // ≈ 24 pt in mm
+  const titleTop = 28;
+  const titleBottom = titleTop + (titleLines.length - 1) * titleLineH;
+  const projectY = titleBottom + 10;
+  const headerH = Math.max(58, (options.projectName ? projectY : titleBottom) + 16);
+
+  // Dark band + accent stripe at its bottom edge
   doc.setFillColor(...BRAND_DARK);
-  doc.rect(0, 0, pageW, 80, 'F');
-
-  // Accent stripe
+  doc.rect(0, 0, pageW, headerH, 'F');
   doc.setFillColor(...BRAND_ACCENT);
-  doc.rect(0, 78, pageW, 3, 'F');
+  doc.rect(0, headerH - 2.5, pageW, 2.5, 'F');
 
-  // Wordmark
+  // Title — WHITE on the dark band (was defaulting to black = invisible)
   doc.setFont('helvetica', 'bold');
-  // BOQ title
-  doc.setFontSize(26);
-  doc.setFont('helvetica', 'bold');
-  const titleLines = doc.splitTextToSize(options.boqTitle, pageW - 40) as string[];
-  doc.text(titleLines, 20, 45);
+  doc.setFontSize(24);
+  doc.setTextColor(...WHITE);
+  doc.text(titleLines, labelX, titleTop);
 
-  // Project name
+  // Project name under the title
   if (options.projectName) {
-    doc.setFontSize(13);
     doc.setFont('helvetica', 'normal');
+    doc.setFontSize(12);
     doc.setTextColor(...BRAND_LIGHT);
-    doc.text(options.projectName, 20, 68);
+    doc.text(options.projectName, labelX, projectY);
   }
 
-  // ── Meta block below header ───────────────────────────────────────────
-  doc.setTextColor(...BRAND_DARK);
-
+  // ── Meta block below header (labels left, values right-aligned) ───────
   const itemCount = options.positions.filter((p) => !isSection(p)).length;
   const sectionCount = buildSectionGroups(options.positions).sections.length;
   const resourceCount = options.positions.reduce((sum, p) => {
@@ -167,47 +275,48 @@ function renderCoverPage(
     return sum + res;
   }, 0);
 
-  const metaY = 96;
-  const labelX = 20;
-  const valueX = 72;
-
-  // Section divider
-  doc.setDrawColor(...BRAND_LIGHT);
-  doc.setLineWidth(0.4);
-  doc.line(labelX, metaY - 4, pageW - 20, metaY - 4);
-
   const metaItems: Array<[string, string]> = [
-    ['Date', formatDate(options.date, locale)],
-    ['Sections', String(sectionCount)],
-    ['Positions', String(itemCount)],
-    ...(resourceCount > 0 ? [['Resources', String(resourceCount)] as [string, string]] : []),
-    ['Direct Cost', formatCurrency(options.directCost, options.currency, locale)],
-    ['Markups', options.markupTotals.map((m) => `${m.name} ${m.percentage}%`).join(', ') || 'None'],
-    ['Net Total', formatCurrency(options.netTotal, options.currency, locale)],
-    ['VAT', `${(options.vatRate * 100).toFixed(0)}% (${formatCurrency(options.vatAmount, options.currency, locale)})`],
+    [L.date, formatDate(options.date, locale)],
+    [L.sections, String(sectionCount)],
+    [L.positions, String(itemCount)],
+    ...(resourceCount > 0 ? [[L.resources, String(resourceCount)] as [string, string]] : []),
+    [L.directCost, formatCurrency(options.directCost, options.currency, locale)],
+    [L.markups, options.markupTotals.map((m) => `${m.name} ${m.percentage}%`).join(', ') || L.none],
+    [L.netTotal, formatCurrency(options.netTotal, options.currency, locale)],
+    [L.vat, `${(options.vatRate * 100).toFixed(0)}% (${formatCurrency(options.vatAmount, options.currency, locale)})`],
   ];
 
-  doc.setFontSize(9);
-  for (let i = 0; i < metaItems.length; i++) {
-    const item = metaItems[i]!;
-    const y = metaY + i * 10;
+  const rowH = 9;
+  const labelW = 45;                 // reserved width for the label column
+  let y = headerH + 18;
+
+  // Top divider
+  doc.setDrawColor(...BRAND_LIGHT);
+  doc.setLineWidth(0.4);
+  doc.line(labelX, y - 5, rightX, y - 5);
+
+  doc.setFontSize(9.5);
+  for (const [label, rawValue] of metaItems) {
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(...BRAND_MID);
-    doc.text(item[0], labelX, y);
-    doc.setFont('helvetica', 'normal');
+    doc.text(label, labelX, y);
+
     doc.setTextColor(...BRAND_DARK);
-    doc.text(item[1], valueX, y);
+    const valueLines = doc.splitTextToSize(rawValue, rightX - labelX - labelW) as string[];
+    doc.text(valueLines, rightX, y, { align: 'right' });
+    y += rowH + (valueLines.length - 1) * 5;
   }
 
-  // Gross total — highlighted
-  const grossY = metaY + metaItems.length * 10 + 4;
+  // ── Gross total — highlighted row ─────────────────────────────────────
+  const grossY = y + 1;
   doc.setDrawColor(...BRAND_LIGHT);
-  doc.line(labelX, grossY - 4, pageW - 20, grossY - 4);
+  doc.setLineWidth(0.4);
+  doc.line(labelX, grossY - 5, rightX, grossY - 5);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(12);
   doc.setTextColor(...BRAND_ACCENT);
-  doc.text('Gross Total', labelX, grossY + 2);
-  doc.text(formatCurrency(options.grossTotal, options.currency, locale), valueX, grossY + 2);
+  doc.text(L.grossTotal, labelX, grossY);
+  doc.text(formatCurrency(options.grossTotal, options.currency, locale), rightX, grossY, { align: 'right' });
 
   // ── Signature block ─────────────────────────────────────────────────
   const sigY = pageH - 55;
@@ -218,12 +327,12 @@ function renderCoverPage(
   doc.setFontSize(8);
   doc.setTextColor(...BRAND_MID);
   doc.setFont('helvetica', 'normal');
-  doc.text('Prepared by:', labelX, sigY + 10);
-  doc.text('Approved by:', pageW / 2, sigY + 10);
+  doc.text(L.preparedBy, labelX, sigY + 10);
+  doc.text(L.approvedBy, pageW / 2, sigY + 10);
   doc.line(labelX, sigY + 28, labelX + 60, sigY + 28);
   doc.line(pageW / 2, sigY + 28, pageW / 2 + 60, sigY + 28);
-  doc.text('Name / Signature / Date', labelX, sigY + 33);
-  doc.text('Name / Signature / Date', pageW / 2, sigY + 33);
+  doc.text(L.signatureLine, labelX, sigY + 33);
+  doc.text(L.signatureLine, pageW / 2, sigY + 33);
 
   // Footer attribution
 }
@@ -233,6 +342,7 @@ function renderCoverPage(
 function renderTableOfContents(
   doc: jsPDF,
   sections: SectionEntry[],
+  L: Record<string, string>,
 ): void {
   const pageW = doc.internal.pageSize.getWidth();
 
@@ -242,7 +352,7 @@ function renderTableOfContents(
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(13);
   doc.setTextColor(...WHITE);
-  doc.text('Table of Contents', 20, 12);
+  doc.text(L.toc, 20, 12);
 
   doc.setTextColor(...BRAND_DARK);
 
@@ -282,6 +392,7 @@ function addPageFooters(doc: jsPDF, options: PdfReportOptions): void {
   const totalPages = (doc.internal as unknown as { getNumberOfPages: () => number }).getNumberOfPages();
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
+  const L = PDF_LABELS[pickPdfLang(options.locale)];
 
   for (let i = 1; i <= totalPages; i++) {
     doc.setPage(i);
@@ -292,7 +403,7 @@ function addPageFooters(doc: jsPDF, options: PdfReportOptions): void {
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(...BRAND_MID);
     doc.text(options.boqTitle, 15, pageH - 7);
-    doc.text(`Page ${i} of ${totalPages}`, pageW - 15, pageH - 7, { align: 'right' });
+    doc.text(`${L.page} ${i} ${L.of} ${totalPages}`, pageW - 15, pageH - 7, { align: 'right' });
   }
 }
 
@@ -306,6 +417,7 @@ function renderBOQTables(
 ): void {
   const { sections, ungrouped } = buildSectionGroups(options.positions);
   const pageW = doc.internal.pageSize.getWidth();
+  const L = PDF_LABELS[pickPdfLang(locale)];
 
   // Section heading bar
   doc.setFillColor(...BRAND_DARK);
@@ -313,7 +425,7 @@ function renderBOQTables(
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(13);
   doc.setTextColor(...WHITE);
-  doc.text('Bill of Quantities', 20, 12);
+  doc.text(L.billOfQuantities, 20, 12);
   doc.setTextColor(...BRAND_DARK);
 
   let currentY = 26;
@@ -339,7 +451,7 @@ function renderBOQTables(
 
     const labelLines = doc.splitTextToSize(sectionLabel, pageW - 40) as string[];
     doc.text(labelLines, 15, currentY);
-    currentY += labelLines.length * 5 + 2;
+    currentY += labelLines.length * 5 + 4;
 
     const body: string[][] = [];
     for (const p of children) {
@@ -373,8 +485,9 @@ function renderBOQTables(
 
     autoTable(doc, {
       startY: currentY,
-      head: [['No.', 'Description', 'Unit', 'Qty', 'Unit Rate', 'Total']],
+      head: [[L.colNo, L.colDescription, L.colUnit, L.colQty, L.colUnitRate, L.colTotal]],
       body,
+      styles: TABLE_STYLES,
       headStyles: headerStyles,
       bodyStyles: { fontSize: 8, textColor: BRAND_DARK },
       alternateRowStyles: { fillColor: [248, 250, 252] as [number, number, number] },
@@ -397,18 +510,19 @@ function renderBOQTables(
 
     const tableEndY = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY;
 
-    // Subtotal row
-    const subtotalY = tableEndY + 2;
+    // Subtotal row — kept clear of the table above (was gluing to the header
+    // row when a section had few/no line items).
+    const subtotalY = tableEndY + 8;
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(8.5);
     doc.setTextColor(...BRAND_MID);
-    const subtotalText = `Section Subtotal: ${formatCurrency(subtotal, options.currency, locale)}`;
+    const subtotalText = `${L.sectionSubtotal} ${formatCurrency(subtotal, options.currency, locale)}`;
     doc.text(subtotalText, pageW - 15, subtotalY, { align: 'right' });
     doc.setDrawColor(...BRAND_ACCENT);
     doc.setLineWidth(0.4);
-    doc.line(pageW - 15 - doc.getTextWidth(subtotalText) - 2, subtotalY + 1, pageW - 15, subtotalY + 1);
+    doc.line(pageW - 15 - doc.getTextWidth(subtotalText) - 2, subtotalY + 1.5, pageW - 15, subtotalY + 1.5);
 
-    currentY = subtotalY + 10;
+    currentY = subtotalY + 13;
     if (currentY > doc.internal.pageSize.getHeight() - 35) {
       doc.addPage();
       currentY = 20;
@@ -428,7 +542,7 @@ function renderBOQTables(
   // Ungrouped positions (if any)
   if (ungrouped.length > 0) {
     const ungroupedSubtotal = ungrouped.reduce((sum, p) => sum + p.total, 0);
-    renderSection('', 'Ungrouped Items', ungrouped, ungroupedSubtotal);
+    renderSection('', L.ungroupedItems, ungrouped, ungroupedSubtotal);
   }
 }
 
@@ -441,6 +555,7 @@ function renderSummary(
 ): void {
   doc.addPage();
   const pageW = doc.internal.pageSize.getWidth();
+  const L = PDF_LABELS[pickPdfLang(locale)];
 
   // Heading
   doc.setFillColor(...BRAND_DARK);
@@ -448,7 +563,7 @@ function renderSummary(
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(13);
   doc.setTextColor(...WHITE);
-  doc.text('Cost Summary', 20, 12);
+  doc.text(L.costSummary, 20, 12);
 
   // Section subtotals table
   const { sections, ungrouped } = buildSectionGroups(options.positions);
@@ -458,14 +573,15 @@ function renderSummary(
   ]);
   if (ungrouped.length > 0) {
     const ungroupedTotal = ungrouped.reduce((sum, p) => sum + p.total, 0);
-    sectionRows.push(['Ungrouped Items', formatCurrency(ungroupedTotal, options.currency, locale)]);
+    sectionRows.push([L.ungroupedItems, formatCurrency(ungroupedTotal, options.currency, locale)]);
   }
 
   if (sectionRows.length > 0) {
     autoTable(doc, {
       startY: 24,
-      head: [['Section', 'Subtotal']],
+      head: [[L.colSection, L.colSubtotal]],
       body: sectionRows,
+      styles: TABLE_STYLES,
       headStyles: { fillColor: BRAND_MID, textColor: WHITE, fontSize: 8.5 },
       bodyStyles: { fontSize: 8.5, textColor: BRAND_DARK },
       alternateRowStyles: { fillColor: [248, 250, 252] as [number, number, number] },
@@ -484,7 +600,7 @@ function renderSummary(
 
   // Financial summary table
   const summaryRows: [string, string][] = [
-    ['Direct Cost', formatCurrency(options.directCost, options.currency, locale)],
+    [L.directCost, formatCurrency(options.directCost, options.currency, locale)],
   ];
 
   for (const m of options.markupTotals) {
@@ -494,16 +610,17 @@ function renderSummary(
     ]);
   }
 
-  const vatLabel = `VAT (${(options.vatRate * 100).toFixed(0)}%)`;
+  const vatLabel = `${L.vat} (${(options.vatRate * 100).toFixed(0)}%)`;
 
   autoTable(doc, {
     startY: afterSectionsY + 10,
-    head: [['Item', 'Amount']],
+    head: [[L.colItem, L.colAmount]],
     body: [
       ...summaryRows,
-      ['Net Total', formatCurrency(options.netTotal, options.currency, locale)],
+      [L.netTotal, formatCurrency(options.netTotal, options.currency, locale)],
       [vatLabel, formatCurrency(options.vatAmount, options.currency, locale)],
     ],
+    styles: TABLE_STYLES,
     headStyles: { fillColor: BRAND_MID, textColor: WHITE, fontSize: 8.5 },
     bodyStyles: { fontSize: 8.5, textColor: BRAND_DARK },
     alternateRowStyles: { fillColor: [248, 250, 252] as [number, number, number] },
@@ -519,16 +636,18 @@ function renderSummary(
 
   const afterSummaryY = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable?.finalY ?? afterSectionsY + 10;
 
-  // Gross total highlight box
+  // Gross total highlight box — text vertically centred in the box
   const boxY = afterSummaryY + 8;
+  const boxH = 18;
   doc.setFillColor(...BRAND_DARK);
-  doc.roundedRect(15, boxY, pageW - 30, 16, 3, 3, 'F');
+  doc.roundedRect(15, boxY, pageW - 30, boxH, 3, 3, 'F');
 
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(11);
+  doc.setFontSize(12);
   doc.setTextColor(...WHITE);
-  doc.text('GROSS TOTAL', 22, boxY + 10);
-  doc.text(formatCurrency(options.grossTotal, options.currency, locale), pageW - 22, boxY + 10, { align: 'right' });
+  const boxMidY = boxY + boxH / 2;
+  doc.text(L.grossTotalUpper, 22, boxMidY, { baseline: 'middle' });
+  doc.text(formatCurrency(options.grossTotal, options.currency, locale), pageW - 22, boxMidY, { align: 'right', baseline: 'middle' });
 }
 
 /* ── Main export function ───────────────────────────────────────────────── */
@@ -543,7 +662,8 @@ function renderSummary(
  *  - Page footers with "Page X of Y"
  */
 export function generateBOQPdf(options: PdfReportOptions): void {
-  const locale = options.locale ?? 'en-US';
+  const locale = options.locale ?? 'es-ES';
+  const L = PDF_LABELS[pickPdfLang(locale)];
 
   const doc = new jsPDF({
     orientation: options.landscape ? 'landscape' : 'portrait',
@@ -553,8 +673,8 @@ export function generateBOQPdf(options: PdfReportOptions): void {
 
   // PDF metadata — embedded identity markers
   doc.setProperties({
-    title: options.projectName || 'BOQ Report',
-    subject: 'Bill of Quantities',
+    title: options.projectName || L.boqReport,
+    subject: L.billOfQuantities,
   });
 
   // ── 1. Cover page ──────────────────────────────────────────────────────
@@ -575,7 +695,7 @@ export function generateBOQPdf(options: PdfReportOptions): void {
     doc.addPage();
     // TOC is rendered with placeholder page numbers first; we re-render
     // it after the BOQ tables to fill in correct page references.
-    renderTableOfContents(doc, sectionEntries);
+    renderTableOfContents(doc, sectionEntries, L);
   }
 
   // ── 4. BOQ tables ──────────────────────────────────────────────────────
@@ -591,7 +711,7 @@ export function generateBOQPdf(options: PdfReportOptions): void {
     const pageH = doc.internal.pageSize.getHeight();
     doc.setFillColor(...WHITE);
     doc.rect(0, 0, pageW, pageH, 'F');
-    renderTableOfContents(doc, sectionEntries);
+    renderTableOfContents(doc, sectionEntries, L);
   }
 
   // ── 6. Summary page ────────────────────────────────────────────────────
