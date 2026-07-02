@@ -129,7 +129,7 @@ function pickPdfLang(locale?: string): PdfLang {
   return code === 'en' ? 'en' : 'es';
 }
 
-const PDF_LABELS: Record<PdfLang, Record<string, string>> = {
+const PDF_LABELS = {
   es: {
     date: 'Fecha',
     sections: 'Capítulos',
@@ -198,7 +198,11 @@ const PDF_LABELS: Record<PdfLang, Record<string, string>> = {
     colAmount: 'Amount',
     boqReport: 'BOQ Report',
   },
-};
+} satisfies Record<PdfLang, Record<string, string>>;
+
+/** Concrete label shape: keys are known, so property access is `string`,
+ *  never `string | undefined` under noUncheckedIndexedAccess. */
+type PdfLabels = (typeof PDF_LABELS)[PdfLang];
 
 /* ── Brand colours ──────────────────────────────────────────────────────── */
 
@@ -342,7 +346,7 @@ function renderCoverPage(
 function renderTableOfContents(
   doc: jsPDF,
   sections: SectionEntry[],
-  L: Record<string, string>,
+  L: PdfLabels,
 ): void {
   const pageW = doc.internal.pageSize.getWidth();
 
