@@ -201,12 +201,18 @@ export function BOQEditorPage() {
     staleTime: 10 * 60_000,
   });
 
-  /** First ready BIM model ID — passed to BOQGrid for mini geometry previews. */
+  /** First usable BIM model ID — passed to BOQGrid for mini geometry previews.
+   *  A ``degraded`` model still has its geometry + elements persisted (it is
+   *  only flagged degraded because the converter produced no quantities), so it
+   *  is just as linkable as a ``ready`` one — mirror BIMPage's canRenderModel
+   *  check (``ready`` OR ``degraded``) so the BIM chip shows for both. */
   const bimModelId = useMemo(() => {
     const models = bimModelsData?.items;
     if (!models || models.length === 0) return null;
-    const ready = models.find((m) => m.status === 'ready' && (m.element_count ?? 0) > 0);
-    return ready?.id ?? null;
+    const usable = models.find(
+      (m) => (m.status === 'ready' || m.status === 'degraded') && (m.element_count ?? 0) > 0,
+    );
+    return usable?.id ?? null;
   }, [bimModelsData]);
 
   // Auto-heal the cad_element_ids mirror ↔ canonical BOQ↔BIM links once when the
